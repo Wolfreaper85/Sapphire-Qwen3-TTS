@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Environment / secrets
+.env
+.env.local
+
+# Voice profiles & audio (user-generated at runtime, not distributed)
+voices/*.json
+voices/*.ogg
+voices/*.wav
+voices/*.mp3
+voices/*.flac
+!voices/.gitkeep
+voices/audio/*
+!voices/audio/.gitkeep
+
+# Model files (users download their own from HuggingFace)
+*.bin
+*.safetensors
+*.gguf
+*.pt
+*.pth
+
+# Logs
+*.log
