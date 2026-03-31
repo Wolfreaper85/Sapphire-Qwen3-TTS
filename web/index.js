@@ -120,10 +120,13 @@ registerPluginSettings({
                         <span id="qwen3-clone-file-info" class="text-muted"></span>
                     </div>
 
-                    <div class="qwen3-section-label">Reference Text <span class="text-muted">(read this aloud for your recording)</span></div>
+                    <div class="qwen3-section-label">
+                        Reference Text <span class="text-muted">(what was said in the audio)</span>
+                        <button class="btn btn-sm qwen3-transcribe-btn" id="qwen3-clone-transcribe" title="Auto-transcribe the reference audio">Transcribe</button>
+                    </div>
                     <div class="qwen3-preset-group">
                         <select id="qwen3-clone-ref-preset">${CLONE_REF_TEXTS.map(d => `<option value="${_esc(d.value)}">${_esc(d.label)}</option>`).join('')}</select>
-                        <textarea id="qwen3-clone-ref-text" rows="2" placeholder="Type the exact words you are saying in the reference audio..."></textarea>
+                        <textarea id="qwen3-clone-ref-text" rows="2" placeholder="Type the exact words, or click Transcribe to auto-detect..."></textarea>
                     </div>
 
                     <label class="qwen3-checkbox-label">
@@ -391,6 +394,64 @@ function _setupRecordButton(container) {
 }
 
 
+// ── Transcribe Button ──
+
+function _setupTranscribeButton(container) {
+    const btn = container.querySelector('#qwen3-clone-transcribe');
+    if (!btn) return;
+
+    btn.addEventListener('click', async () => {
+        const fileInput = container.querySelector('#qwen3-clone-file');
+        if (!fileInput?.files?.length) {
+            alert('Upload or record reference audio first, then click Transcribe.');
+            return;
+        }
+
+        const textarea = container.querySelector('#qwen3-clone-ref-text');
+        const origText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Transcribing...';
+
+        try {
+            const formData = new FormData();
+            formData.append('audio', fileInput.files[0]);
+
+            const resp = await fetch('/api/transcribe', {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': CSRF() },
+                body: formData,
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.detail || `HTTP ${resp.status}`);
+            }
+
+            const data = await resp.json();
+            if (data.text) {
+                textarea.value = data.text;
+                // Switch preset dropdown to "Custom" if it exists
+                const preset = container.querySelector('#qwen3-clone-ref-preset');
+                if (preset) {
+                    const customOpt = Array.from(preset.options).find(o => o.value === '' || o.label === 'Custom');
+                    if (customOpt) preset.value = customOpt.value;
+                }
+                btn.textContent = 'Transcribed!';
+            } else if (data.quiet) {
+                textarea.value = '';
+                btn.textContent = 'No speech detected';
+            }
+        } catch (e) {
+            console.error('[Transcribe]', e);
+            btn.textContent = 'Failed';
+            alert(`Transcription failed: ${e.message}\n\nMake sure STT is enabled in Sapphire settings.`);
+        }
+
+        setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 3000);
+    });
+}
+
+
 // ── File to Base64 ──
 
 function _fileToBase64(file) {
@@ -560,6 +621,9 @@ function _attachListeners(container) {
 
     // Mic recording
     _setupRecordButton(container);
+
+    // Transcribe button — auto-detect what was said in the reference audio
+    _setupTranscribeButton(container);
 }
 
 
