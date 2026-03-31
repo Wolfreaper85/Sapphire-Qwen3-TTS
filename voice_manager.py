@@ -194,12 +194,15 @@ class VoiceManager:
                 "voice_clone": "Cloned",
                 "custom_voice": "Custom Preset",
             }.get(vtype, "Custom")
+            model_size = profile_data.get("model_size", "")
+            size_tag = f" {model_size}" if model_size else ""
 
             voices.append({
                 "voice_id": f"qwen3:{profile_data['id']}",
                 "name": profile_data.get("name", "Unnamed"),
-                "category": f"Qwen3-TTS ({type_label})",
+                "category": f"Qwen3-TTS{size_tag} ({type_label})",
                 "description": profile_data.get("instruct", "") or profile_data.get("speaker", ""),
+                "model_size": model_size,
             })
 
         # Built-in presets

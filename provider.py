@@ -148,10 +148,21 @@ def _start_server():
     _server_manager._env = env
 
     # Monkey-patch start() so both initial launch AND monitor_and_restart()
-    # use our custom env vars.  Without this, the monitor's self.start()
-    # launches without env vars and the server falls back to defaults.
+    # use our custom env vars.  Re-reads settings on each restart so that
+    # model_size changes are picked up without recreating the provider.
     def _patched_start():
-        _start_with_env(_server_manager, env)
+        fresh_settings = _get_settings()
+        fresh_env = os.environ.copy()
+        fresh_env['QWEN3_TTS_PORT'] = str(_get_port())
+        fresh_env['QWEN3_TTS_DEVICE'] = fresh_settings.get('device', 'cuda:0')
+        fresh_env['QWEN3_TTS_MODEL_SIZE'] = fresh_settings.get('model_size', '0.6B')
+        fresh_env['QWEN3_TTS_LOAD_MODELS'] = fresh_settings.get('load_models', 'all')
+        fresh_env['QWEN3_TTS_OFFLOAD_TIMEOUT'] = str(fresh_settings.get('offload_timeout', '60'))
+        if not fresh_env.get('HF_HOME'):
+            portable_cache = Path(__file__).parent.parent.parent.parent / '.hf_cache'
+            if portable_cache.is_dir():
+                fresh_env['HF_HOME'] = str(portable_cache)
+        _start_with_env(_server_manager, fresh_env)
     _server_manager.start = _patched_start
 
     _server_manager.start()
@@ -287,6 +298,19 @@ class Qwen3TTSProvider(BaseTTSProvider):
         if not profile:
             logger.warning(f"Qwen3-TTS: voice profile '{profile_id}' not found, using default")
             return self._generate_custom(server, text, DEFAULT_SPEAKER, None, speed)
+
+        # Check model size compatibility — warn but don't auto-switch
+        # (switching reloads all models and takes 30-60s, too slow for live use)
+        profile_size = getattr(profile, 'model_size', '') or ''
+        if profile_size:
+            current_settings = _get_settings()
+            current_size = current_settings.get('model_size', '0.6B')
+            if profile_size != current_size:
+                logger.warning(
+                    f"[Qwen3-TTS] Voice '{profile.name}' was created with {profile_size} "
+                    f"but server is running {current_size} — generation may fail or sound different. "
+                    f"Change model size in Qwen3-TTS settings to match."
+                )
 
         if profile.type == 'custom_voice':
             return self._post(server, '/generate/custom', {
