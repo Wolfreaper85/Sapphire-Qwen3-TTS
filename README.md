@@ -26,7 +26,13 @@ Local AI text-to-speech plugin for [Sapphire](https://github.com/SapphireAI) wit
 
 ## Installation
 
-### 1. Clone or Download
+### Quick Install (Recommended)
+
+Double-click **`install.bat`** — it auto-detects your GPU, installs the right PyTorch + CUDA version, installs all dependencies, and optionally installs the faster backend. Just follow the prompts.
+
+### Manual Install
+
+#### 1. Clone or Download
 
 Copy the `qwen3-tts` folder into your Sapphire `plugins/` directory:
 
@@ -40,7 +46,7 @@ sapphire-dev/
       ...
 ```
 
-### 2. Install PyTorch (GPU-specific)
+#### 2. Install PyTorch (GPU-specific)
 
 PyTorch must match your GPU generation. Pick the right command:
 
@@ -61,7 +67,7 @@ pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 > **Not sure which GPU you have?** Run `nvidia-smi` in a terminal - it shows your GPU model at the top.
 
-### 3. Install Dependencies
+#### 3. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -69,14 +75,14 @@ pip install -r requirements.txt
 
 This installs `qwen-tts`, `soundfile`, `numpy`, `psutil`, and `requests`.
 
-### 4. Enable the Plugin
+#### 4. Enable the Plugin
 
 1. Start Sapphire
 2. Go to **Settings** > **Plugins**
 3. Enable **Qwen3-TTS**
 4. The TTS server will auto-launch in the background
 
-### 5. First Run (Model Download)
+#### 5. First Run (Model Download)
 
 On first launch, models automatically download from HuggingFace. Which models depend on your Model Size setting:
 
@@ -202,6 +208,8 @@ If you try to use a 1.7B clone voice while the 0.6B server is running (or vice v
 
 ```
 qwen3-tts/
+  install.bat          - One-click installer (double-click to run)
+  install.py           - Installer logic (GPU detection, PyTorch, deps)
   plugin.json          - Plugin manifest
   provider.py          - TTS provider (auto-launches server)
   server.py            - Standalone HTTP server (subprocess)

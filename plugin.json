@@ -1,6 +1,6 @@
 {
   "name": "qwen3-tts",
-  "version": "1.2.0",
+  "version": "1.4.0",
   "description": "Qwen3-TTS \u2014 local AI text-to-speech with voice cloning, voice design, and preset voices",
   "author": "sapphire",
   "icon": "\ud83c\udfb5",
