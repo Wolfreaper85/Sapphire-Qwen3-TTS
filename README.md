@@ -23,12 +23,21 @@ Local AI text-to-speech plugin for [Sapphire](https://github.com/SapphireAI) wit
 - **Python 3.10+** (3.11 recommended)
 - **PyTorch with CUDA** - version depends on your GPU (see install guide below)
 - **Sapphire** - the plugin runs inside Sapphire's plugin system
+- **OS:** Windows 10+, Linux (Ubuntu 22.04+, Fedora, Arch), or macOS with NVIDIA eGPU
 
 ## Installation
 
 ### Quick Install (Recommended)
 
-Double-click **`install.bat`** — it auto-detects your GPU, installs the right PyTorch + CUDA version, installs all dependencies, and optionally installs the faster backend. Just follow the prompts.
+**Windows:** Double-click **`install.bat`**
+
+**Linux / macOS:**
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+The installer auto-detects your GPU, installs the right PyTorch + CUDA version, installs all dependencies, and optionally installs the faster backend. Just follow the prompts.
 
 ### Manual Install
 
@@ -208,7 +217,8 @@ If you try to use a 1.7B clone voice while the 0.6B server is running (or vice v
 
 ```
 qwen3-tts/
-  install.bat          - One-click installer (double-click to run)
+  install.bat          - One-click installer for Windows
+  install.sh           - One-click installer for Linux / macOS
   install.py           - Installer logic (GPU detection, PyTorch, deps)
   plugin.json          - Plugin manifest
   provider.py          - TTS provider (auto-launches server)
