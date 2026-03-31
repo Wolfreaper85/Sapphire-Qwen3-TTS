@@ -28,14 +28,16 @@ Thumbs.db
 .env.local
 
 # Voice profiles & audio (user-generated at runtime, not distributed)
-voices/*.json
-voices/*.ogg
-voices/*.wav
-voices/*.mp3
-voices/*.flac
+voices/**/*.json
+voices/**/*.ogg
+voices/**/*.wav
+voices/**/*.mp3
+voices/**/*.flac
+voices/**/*.pt
 !voices/.gitkeep
-voices/audio/*
-!voices/audio/.gitkeep
+!voices/custom/.gitkeep
+!voices/0.6B/.gitkeep
+!voices/1.7B/.gitkeep
 
 # Model files (users download their own from HuggingFace)
 *.bin

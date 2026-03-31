@@ -78,15 +78,24 @@ This installs `qwen-tts`, `soundfile`, `numpy`, `psutil`, and `requests`.
 
 ### 5. First Run (Model Download)
 
-On first launch, three models will automatically download from HuggingFace (~13 GB total):
+On first launch, models automatically download from HuggingFace. Which models depend on your Model Size setting:
+
+**0.6B (default — recommended for most setups):**
+
+| Model | Size | Purpose |
+|-------|------|---------|
+| `Qwen3-TTS-12Hz-0.6B-CustomVoice` | ~1.5 GB | Preset speakers + style instructions |
+| `Qwen3-TTS-12Hz-0.6B-Base` | ~1.5 GB | Voice cloning from audio samples |
+
+**1.7B (full quality):**
 
 | Model | Size | Purpose |
 |-------|------|---------|
 | `Qwen3-TTS-12Hz-1.7B-CustomVoice` | ~4.3 GB | Preset speakers + style instructions |
-| `Qwen3-TTS-12Hz-1.7B-VoiceDesign` | ~4.3 GB | Natural language voice descriptions |
+| `Qwen3-TTS-12Hz-1.7B-VoiceDesign` | ~4.3 GB | Natural language voice descriptions (1.7B only) |
 | `Qwen3-TTS-12Hz-1.7B-Base` | ~4.3 GB | Voice cloning from audio samples |
 
-This is a one-time download. Models are cached in your HuggingFace cache directory.
+This is a one-time download per model size. Models are cached in your HuggingFace cache directory.
 
 ## Usage
 
@@ -120,23 +129,60 @@ Saved voices appear in the persona voice dropdown when Qwen3-TTS is set as the a
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Model Size | 1.7B | `1.7B` (full quality) or `0.6B` (lighter, less VRAM) |
+| Model Size | 0.6B | `0.6B` (lighter, less VRAM) or `1.7B` (full quality + voice design) |
 | Server Port | 5013 | Port for the TTS subprocess server |
 | Device | cuda:0 | GPU device (`cuda:0`, `cuda:1`, or `cpu`) |
 | Models to Load | All | Which models to load at startup. Idle models auto-offload to CPU after the timeout. |
 | Offload Timeout | 60 | Seconds of inactivity before an idle model moves from GPU to CPU. Set 0 to disable. |
 
+## Model Sizes: 0.6B vs 1.7B
+
+Qwen3-TTS comes in two sizes. Choose based on your VRAM budget.
+
+| Feature | 0.6B (Light) | 1.7B (Full) |
+|---------|-------------|-------------|
+| VRAM usage | ~2-3 GB | ~6-8 GB |
+| Custom Voice (presets + style) | Yes | Yes |
+| Voice Cloning | Yes | Yes |
+| Voice Design (natural language) | No | Yes |
+| Best for | Daily use alongside LLMs | Higher quality, voice creation |
+
+**Typical VRAM budgets:**
+- **RTX 5070 Ti (16 GB):** 0.6B works great alongside LM Studio (~10 GB for LLM). 1.7B requires closing other GPU apps.
+- **RTX 4090 / 5090 (24 GB):** 1.7B fits comfortably alongside most LLMs.
+- **Dual GPU setups:** Run LLM on one GPU, Qwen3-TTS on the other (`device: cuda:1`).
+
+## Voice Types & Compatibility
+
+| Voice Type | Model Bound? | Works Across Sizes? | Storage |
+|-----------|-------------|-------------------|---------|
+| **Built-in Presets** (Ryan, Serena, etc.) | No | Yes | No files (hardcoded) |
+| **Custom Voice** (preset + style instruction) | No | Yes | `voices/custom/` |
+| **Voice Clone** (from audio sample) | **Yes** | **No** — 0.6B clones fail on 1.7B and vice versa | `voices/0.6B/` or `voices/1.7B/` |
+| **Voice Design** (natural language description) | **Yes** | 1.7B only | `voices/1.7B/` |
+
+Custom voices are cross-compatible because they only store a speaker name and text instruction — no model-specific tensors. Clone voices contain cached embeddings (`.pt` files) with different tensor dimensions per model size, so they're locked to the size they were created on.
+
+## Pro Tip: Design on 1.7B, Clone to 0.6B
+
+Voice Design is 1.7B-only, but you can create a voice with it and then port it to 0.6B for daily use:
+
+1. **Free up VRAM** — Close LM Studio or other GPU apps temporarily
+2. **Switch to 1.7B** in plugin settings (the server will restart and reload models)
+3. **Voice Design tab** — Describe your ideal voice (e.g. "a deep, gravelly male voice with a slight Southern accent")
+4. **Generate previews** until you find one you like
+5. **Save the voice** (this saves the preview audio too)
+6. **Switch back to 0.6B** in plugin settings
+7. **Voice Clone tab** — Upload the saved preview audio as your reference clip
+8. **Save the clone** — Now you have a portable 0.6B version
+
+The 0.6B clone won't be identical to the 1.7B design, but it captures the core vocal characteristics. This workflow lets you use 1.7B as a "voice creation studio" and 0.6B as your daily driver.
+
 ## Important Notes
-
-### Model Size and Saved Voices
-
-**Saved clone voices are tied to the model size they were created with.** A voice cloned on the 1.7B model will not work correctly if you switch to 0.6B (and vice versa). If you change the Model Size setting, you will need to re-clone your voices.
-
-This applies to **cloned voices only** — preset speakers (Ryan, Serena, etc.) work with either model size.
 
 ### Auto-Offload (VRAM Management)
 
-All three models load at startup (~15 GB total for 1.7B). After 60 seconds of inactivity, unused models automatically move to CPU RAM to free GPU memory. When a request comes in for an offloaded model, it reloads to GPU in ~2-3 seconds.
+All loaded models start on GPU. After 60 seconds of inactivity, unused models automatically move to CPU RAM to free GPU memory. When a request comes in for an offloaded model, it reloads to GPU in ~2-3 seconds.
 
 In practice: if you're only chatting with personas using cloned voices, the Design and CustomVoice models offload automatically, leaving the full GPU for the Base (clone) model. When you open Voice Lab to create new voices, the needed models reload on demand.
 
@@ -147,6 +193,10 @@ When you save a cloned voice, a `.pt` file is created containing the pre-compute
 - Voice output is **more consistent** across different sentences
 - The cache is created once at save time and reused forever
 - If you delete a voice, the `.pt` cache is cleaned up automatically
+
+### Model Size Mismatch Protection
+
+If you try to use a 1.7B clone voice while the 0.6B server is running (or vice versa), the provider will **block the request** with a clear error rather than producing garbled audio. Custom voices and built-in presets are not affected — they work on any size.
 
 ## File Structure
 
@@ -162,8 +212,13 @@ qwen3-tts/
     index.js           - Voice Lab settings UI
     main.js            - CSS loader
     voice-lab.css      - Styling
-  voices/              - Saved voice profiles (runtime)
-    audio/             - Reference audio files (runtime)
+  voices/
+    custom/            - Custom preset voices (cross-compatible)
+      audio/           - Preview audio for custom voices
+    0.6B/              - Clone & design voices for 0.6B model
+      audio/           - Reference & preview audio
+    1.7B/              - Clone & design voices for 1.7B model
+      audio/           - Reference & preview audio
 ```
 
 ## Performance

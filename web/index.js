@@ -239,28 +239,61 @@ function _showHelpModal() {
         <div class="qwen3-modal">
             <button class="qwen3-modal-close">&times;</button>
             <h3>\uD83C\uDFB5 How to Use the Voice Lab</h3>
+
+            <h4>Getting Started</h4>
             <ol>
                 <li><strong>Pick a tab</strong> at the top to choose how you want to create a voice:
-                    <br>&bull; <strong>Voice Design</strong> \u2014 Describe a voice in words (e.g. "a warm old man voice")
+                    <br>&bull; <strong>Voice Design</strong> \u2014 Describe a voice in words (e.g. "a warm old man voice"). <em>Requires 1.7B model.</em>
                     <br>&bull; <strong>Voice Clone</strong> \u2014 Upload or record a short audio clip to copy that voice
                     <br>&bull; <strong>Custom Voice</strong> \u2014 Pick a built-in speaker and optionally add a style</li>
                 <li><strong>Generate a preview</strong> \u2014 Type some text and click the Generate button to hear how it sounds</li>
                 <li><strong>Save the voice</strong> \u2014 If you like it, click "Save Voice" and give it a name. This stores it permanently.</li>
-                <li><strong>Check your Voice Library</strong> \u2014 The Library tab shows all your saved voices</li>
+                <li><strong>Check your Voice Library</strong> \u2014 The Library tab shows all your saved voices, grouped by type</li>
                 <li><strong>Assign to a persona</strong> \u2014 Go to the <strong>Personas</strong> page, and in the voice dropdown you'll see your saved Qwen3 voices. Select one for any persona.</li>
                 <li><strong>That's it!</strong> \u2014 When that persona responds in chat, it will speak with the voice you created</li>
             </ol>
+
+            <h4>Model Sizes: 0.6B vs 1.7B</h4>
+            <p>Qwen3-TTS comes in two sizes. You can change this in plugin settings.</p>
+            <table class="qwen3-help-table">
+                <tr><th></th><th>0.6B (Light)</th><th>1.7B (Full)</th></tr>
+                <tr><td>VRAM</td><td>~2-3 GB</td><td>~6-8 GB</td></tr>
+                <tr><td>Custom Voice</td><td>\u2713</td><td>\u2713</td></tr>
+                <tr><td>Voice Clone</td><td>\u2713</td><td>\u2713</td></tr>
+                <tr><td>Voice Design</td><td>\u2717</td><td>\u2713</td></tr>
+                <tr><td>Best for</td><td>Daily use alongside LLMs</td><td>Higher quality, voice design</td></tr>
+            </table>
+
+            <h4>Voice Types & Storage</h4>
+            <ul>
+                <li><strong>Custom Voices</strong> (speaker + style) \u2014 Work on <em>any</em> model size. Stored in <code>voices/custom/</code></li>
+                <li><strong>Clone Voices</strong> \u2014 Tied to the model size they were created on. A 0.6B clone won't work on 1.7B and vice versa. Stored in <code>voices/0.6B/</code> or <code>voices/1.7B/</code></li>
+                <li><strong>Designed Voices</strong> \u2014 1.7B only. Stored in <code>voices/1.7B/</code></li>
+                <li><strong>Built-in Presets</strong> (Ryan, Serena, etc.) \u2014 Work on any model size, no files needed.</li>
+            </ul>
+
+            <h4>Pro Tip: Design on 1.7B, Clone to 0.6B</h4>
+            <p>If you have the VRAM for it, you can use Voice Design to create the perfect voice on 1.7B, then port it to 0.6B for daily use:</p>
+            <ol>
+                <li>Temporarily close other GPU apps (LM Studio, etc.) to free VRAM</li>
+                <li>Switch to <strong>1.7B</strong> in plugin settings (server will restart)</li>
+                <li>Use the <strong>Voice Design</strong> tab to describe and generate your ideal voice</li>
+                <li>Save the generated audio preview (or note the audio)</li>
+                <li>Switch back to <strong>0.6B</strong> in plugin settings</li>
+                <li>Use the <strong>Voice Clone</strong> tab with the designed audio as your reference clip</li>
+                <li>Save the clone \u2014 now you have a portable 0.6B version of your designed voice</li>
+            </ol>
+            <p class="text-muted" style="font-size:0.85em">The 0.6B clone won't be identical to the 1.7B design, but it will capture the core vocal characteristics.</p>
+
+            <h4>Tips</h4>
             <div class="qwen3-tip">
-                <strong>Tip:</strong> Previews are temporary and won't be saved unless you click "Save Voice". You can generate as many previews as you want before saving.
+                <strong>Previews:</strong> Temporary and won't be saved unless you click "Save Voice". Generate as many as you want before saving.
             </div>
             <div class="qwen3-tip" style="margin-top:8px">
-                <strong>Tip:</strong> For voice cloning, a clean 3-10 second recording with no background noise works best. Speak clearly and naturally. 8-10 seconds is ideal.
+                <strong>Cloning:</strong> A clean 3-10 second recording with no background noise works best. Speak clearly and naturally. 8-10 seconds is ideal.
             </div>
             <div class="qwen3-tip" style="margin-top:8px">
-                <strong>Tip:</strong> Set persona pitch to <strong>1.0</strong> for cloned voices. The clone already captured your exact pitch \u2014 any shift will distort it.
-            </div>
-            <div class="qwen3-tip" style="margin-top:8px">
-                <strong>Important:</strong> Saved clone voices are tied to the model size (1.7B or 0.6B) they were created with. If you switch model sizes in settings, you\u2019ll need to re-clone your voices.
+                <strong>Pitch:</strong> Set persona pitch to <strong>1.0</strong> for cloned voices. The clone already captured your exact pitch \u2014 any shift will distort it.
             </div>
             <div class="qwen3-tip" style="margin-top:8px">
                 <strong>VRAM:</strong> Idle models auto-offload from GPU to CPU after 60 seconds. They reload automatically when needed (~2-3s). You don\u2019t need to manage this manually.
@@ -367,6 +400,7 @@ async function _checkStatus(container) {
                 return `${icon} ${k}`;
             });
             const memInfo = d.memory_gb > 0 ? ` \u2014 ${d.memory_gb} GB RAM` : '';
+            container._serverModelSize = d.model_size || '0.6B';
             el.innerHTML = `<span class="qwen3-status-ok">\u2713 Server running</span> \u2014 ${d.model_size || '?'} on ${d.device || '?'}${memInfo}<br><span class="text-muted" style="font-size:0.85em">${parts.join(' &nbsp;\u2022&nbsp; ')}</span>`;
         } else {
             el.innerHTML = `<span class="qwen3-status-err">\u2717 Server not running</span> \u2014 It should auto-start when you select Qwen3-TTS as your TTS provider.`;
@@ -475,7 +509,7 @@ function _attachListeners(container) {
         const language = container.querySelector('#qwen3-clone-lang')?.value;
 
         // Upload ref audio first so it's saved for the profile
-        const uploadRes = await _apiPost('upload-ref', { audio: refAudioB64 });
+        const uploadRes = await _apiPost('upload-ref', { audio: refAudioB64, model_size: container._serverModelSize || '0.6B' });
         if (uploadRes.error) return uploadRes;
         container._cloneRefFilename = uploadRes.filename;
 
@@ -561,9 +595,16 @@ function _attachSaveBtn(container, tab, getProfileData) {
         const data = getProfileData();
         data.name = name;
 
+        // Tag with the current server's model size
+        try {
+            const statusRes = await fetch(`${API}/status`);
+            const statusData = await statusRes.json();
+            if (statusData.model_size) data.model_size = statusData.model_size;
+        } catch { /* use server default */ }
+
         // Save preview audio if we have it
         if (container._lastAudioB64) {
-            const uploadRes = await _apiPost('upload-ref', { audio: container._lastAudioB64 });
+            const uploadRes = await _apiPost('upload-ref', { audio: container._lastAudioB64, model_size: data.model_size || '0.6B' });
             if (uploadRes.filename) data.preview_audio = uploadRes.filename;
         }
 
@@ -604,12 +645,23 @@ async function _loadLibrary(container) {
             return;
         }
 
-        list.innerHTML = voices.map(v => {
+        // Group voices: custom voices separate, clone/design by model size
+        const customVoices = voices.filter(v => v.type === 'custom_voice');
+        const modelVoices = {};
+        for (const v of voices.filter(v => v.type !== 'custom_voice')) {
+            const size = v.model_size || 'Unknown';
+            if (!modelVoices[size]) modelVoices[size] = [];
+            modelVoices[size].push(v);
+        }
+
+        const currentSize = container._serverModelSize || '0.6B';
+
+        function _renderVoiceCard(v, dimmed) {
             const typeIcon = { voice_design: '\uD83C\uDFA8', voice_clone: '\uD83D\uDCCB', custom_voice: '\uD83C\uDF99\uFE0F' }[v.type] || '\uD83C\uDFB5';
-            const typeLabel = { voice_design: 'Designed', voice_clone: 'Cloned', custom_voice: 'Preset' }[v.type] || v.type;
+            const typeLabel = { voice_design: 'Designed', voice_clone: 'Cloned', custom_voice: 'Custom' }[v.type] || v.type;
             const detail = v.instruct || v.speaker || '';
             return `
-                <div class="qwen3-voice-card" data-id="${_esc(v.id)}">
+                <div class="qwen3-voice-card${dimmed ? ' qwen3-voice-card-inactive' : ''}" data-id="${_esc(v.id)}">
                     <div class="qwen3-voice-info">
                         <span class="qwen3-voice-icon">${typeIcon}</span>
                         <div>
@@ -624,7 +676,45 @@ async function _loadLibrary(container) {
                     </div>
                 </div>
             `;
-        }).join('');
+        }
+
+        let html = '';
+
+        // Custom Voices section (work on any model size)
+        if (customVoices.length) {
+            html += `
+                <div class="qwen3-library-section">
+                    <div class="qwen3-library-section-header">
+                        <span class="qwen3-library-section-title">Custom Voices</span>
+                        <span class="qwen3-library-section-count">${customVoices.length} voice${customVoices.length !== 1 ? 's' : ''}</span>
+                        <span class="qwen3-library-section-active">All Sizes</span>
+                    </div>
+                    ${customVoices.map(v => _renderVoiceCard(v, false)).join('')}
+                </div>
+            `;
+        }
+
+        // Clone/Design voices by model size (current size first)
+        const sortedSizes = Object.keys(modelVoices).sort((a, b) => {
+            if (a === currentSize) return -1;
+            if (b === currentSize) return 1;
+            return a.localeCompare(b);
+        });
+        for (const size of sortedSizes) {
+            const sizeVoices = modelVoices[size];
+            const isActive = size === currentSize;
+            html += `
+                <div class="qwen3-library-section">
+                    <div class="qwen3-library-section-header">
+                        <span class="qwen3-library-section-title">${_esc(size)} Voices</span>
+                        <span class="qwen3-library-section-count">${sizeVoices.length} voice${sizeVoices.length !== 1 ? 's' : ''}</span>
+                        ${isActive ? '<span class="qwen3-library-section-active">Active</span>' : '<span class="qwen3-library-section-inactive">Inactive</span>'}
+                    </div>
+                    ${sizeVoices.map(v => _renderVoiceCard(v, !isActive)).join('')}
+                </div>
+            `;
+        }
+        list.innerHTML = html;
 
         // Wire delete buttons
         list.querySelectorAll('.qwen3-delete-voice').forEach(btn => {

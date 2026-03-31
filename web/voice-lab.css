@@ -108,6 +108,46 @@
     font-size: 0.9em;
     color: var(--text-muted, #aaa);
 }
+.qwen3-modal h4 {
+    margin-top: 18px;
+    margin-bottom: 8px;
+    font-size: 1em;
+    color: var(--text-primary, #eee);
+    border-bottom: 1px solid var(--border, #333);
+    padding-bottom: 4px;
+}
+.qwen3-modal ul {
+    padding-left: 20px;
+    line-height: 1.7;
+}
+.qwen3-modal ul li {
+    margin-bottom: 4px;
+}
+.qwen3-modal p {
+    line-height: 1.6;
+    margin: 6px 0;
+}
+.qwen3-help-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0 12px;
+    font-size: 0.9em;
+}
+.qwen3-help-table th,
+.qwen3-help-table td {
+    padding: 6px 10px;
+    border: 1px solid var(--border, #333);
+    text-align: center;
+}
+.qwen3-help-table th {
+    background: var(--bg-secondary, #1a1a2e);
+    color: var(--accent, #7c5cbf);
+    font-weight: 600;
+}
+.qwen3-help-table td:first-child {
+    text-align: left;
+    font-weight: 500;
+}
 
 /* ── Tabs ── */
 .qwen3-tabs {
@@ -367,6 +407,50 @@
     border-radius: 3px;
     color: var(--text-muted, #888);
     user-select: all;
+}
+
+/* ── Library model-size sections ── */
+.qwen3-library-section {
+    margin-bottom: 16px;
+}
+.qwen3-library-section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border, #333);
+}
+.qwen3-library-section-title {
+    font-weight: 600;
+    font-size: 1em;
+    color: var(--text-primary, #eee);
+}
+.qwen3-library-section-count {
+    font-size: 0.8em;
+    color: var(--text-muted, #888);
+}
+.qwen3-library-section-active {
+    font-size: 0.7em;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #2d7a3a;
+    color: #fff;
+    margin-left: auto;
+}
+.qwen3-library-section-inactive {
+    font-size: 0.7em;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--bg-tertiary, #252540);
+    color: var(--text-muted, #888);
+    margin-left: auto;
+}
+.qwen3-voice-card-inactive {
+    opacity: 0.6;
+}
+.qwen3-voice-card-inactive:hover {
+    opacity: 0.85;
 }
 
 /* ── Library empty state ── */

@@ -72,7 +72,8 @@ async def save_voice(**kwargs):
     # Auto-create cached voice prompt for clone voices
     if profile.type == 'voice_clone' and profile.ref_audio:
         try:
-            prompt_path = os.path.join(_plugin_dir, "voices", f"{profile.id}.pt")
+            voice_dir = voice_manager.get_voice_dir(profile.type, profile.model_size)
+            prompt_path = os.path.join(str(voice_dir), f"{profile.id}.pt")
             server = _server_url()
             r = requests.post(f"{server}/create-prompt", json={
                 "ref_audio": profile.ref_audio,
@@ -295,8 +296,8 @@ async def get_status(**kwargs):
 
 
 async def open_folder(**kwargs):
-    """POST /api/plugin/qwen3-tts/open-folder — open voices/audio folder in file explorer."""
-    audio_dir = os.path.join(_plugin_dir, "voices", "audio")
+    """POST /api/plugin/qwen3-tts/open-folder — open voices folder in file explorer."""
+    audio_dir = os.path.join(_plugin_dir, "voices")
     os.makedirs(audio_dir, exist_ok=True)
     try:
         if sys.platform == "win32":
@@ -335,5 +336,8 @@ async def upload_reference_audio(**kwargs):
     elif audio_bytes[:4] == b'OggS':
         ext = ".ogg"
 
-    filename = voice_manager.save_audio_file(audio_bytes, prefix="ref", ext=ext)
+    # Save to the correct subdirectory based on voice type
+    voice_type = body.get("voice_type", "voice_clone")  # uploads are typically for clones
+    model_size = body.get("model_size", "0.6B")
+    filename = voice_manager.save_audio_file(audio_bytes, voice_type=voice_type, model_size=model_size, prefix="ref", ext=ext)
     return {"status": "uploaded", "filename": filename}

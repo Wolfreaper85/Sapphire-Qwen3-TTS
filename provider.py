@@ -246,9 +246,15 @@ class Qwen3TTSProvider(BaseTTSProvider):
                 _last_relaunch_attempt = now
                 logger.warning("[Qwen3-TTS] Server not healthy, attempting relaunch...")
                 _start_server()
+                # Wait for server to finish loading (models take 15-30s)
+                if not self._wait_for_server(timeout=60):
+                    logger.error("[Qwen3-TTS] Server failed to become healthy after relaunch")
+                    return None
             else:
-                logger.warning("[Qwen3-TTS] Server not healthy, skipping relaunch (cooldown)")
-                return None
+                # Server was recently relaunched — wait for it instead of giving up
+                if not self._wait_for_server(timeout=45):
+                    logger.warning("[Qwen3-TTS] Server not healthy after waiting (cooldown active)")
+                    return None
 
         server = _server_url()
 
@@ -269,6 +275,24 @@ class Qwen3TTSProvider(BaseTTSProvider):
             # never be sent as a CustomVoice speaker name.
             logger.warning(f"[Qwen3-TTS] -> non-qwen3 voice '{voice}', falling back to default speaker: {DEFAULT_SPEAKER}")
             return self._generate_custom(server, text, DEFAULT_SPEAKER, kwargs.get('instruct'), clamped_speed)
+
+    def _wait_for_server(self, timeout: int = 60, poll_interval: float = 2.0) -> bool:
+        """Wait for the server to become healthy, polling periodically.
+
+        Returns True if healthy within timeout, False otherwise.
+        """
+        deadline = time.time() + timeout
+        attempt = 0
+        while time.time() < deadline:
+            attempt += 1
+            if _server_is_healthy():
+                logger.info(f"[Qwen3-TTS] Server ready after {attempt} health checks")
+                return True
+            remaining = deadline - time.time()
+            if remaining > 0:
+                logger.debug(f"[Qwen3-TTS] Waiting for server... ({remaining:.0f}s remaining)")
+                time.sleep(min(poll_interval, remaining))
+        return False
 
     def _generate_custom(self, server: str, text: str, speaker: str,
                          instruct: Optional[str], speed: float) -> Optional[bytes]:
@@ -299,18 +323,27 @@ class Qwen3TTSProvider(BaseTTSProvider):
             logger.warning(f"Qwen3-TTS: voice profile '{profile_id}' not found, using default")
             return self._generate_custom(server, text, DEFAULT_SPEAKER, None, speed)
 
-        # Check model size compatibility — warn but don't auto-switch
-        # (switching reloads all models and takes 30-60s, too slow for live use)
+        # Check model size compatibility
         profile_size = getattr(profile, 'model_size', '') or ''
-        if profile_size:
-            current_settings = _get_settings()
-            current_size = current_settings.get('model_size', '0.6B')
-            if profile_size != current_size:
-                logger.warning(
-                    f"[Qwen3-TTS] Voice '{profile.name}' was created with {profile_size} "
-                    f"but server is running {current_size} — generation may fail or sound different. "
-                    f"Change model size in Qwen3-TTS settings to match."
-                )
+        current_settings = _get_settings()
+        current_size = current_settings.get('model_size', '0.6B')
+        model_size_mismatch = bool(profile_size and profile_size != current_size)
+
+        if model_size_mismatch and profile.type == 'voice_clone':
+            # Hard block: clone voices have incompatible tensor dimensions across model sizes.
+            # Generating produces hallucinated/garbled audio instead of failing cleanly.
+            logger.error(
+                f"[Qwen3-TTS] BLOCKED: Voice '{profile.name}' is a {profile_size} clone "
+                f"but server runs {current_size}. Clone voices are incompatible across "
+                f"model sizes. Create a new clone on {current_size} or switch server to {profile_size}."
+            )
+            return None
+
+        if model_size_mismatch:
+            logger.warning(
+                f"[Qwen3-TTS] Voice '{profile.name}' was created with {profile_size} "
+                f"but server is running {current_size} — results may differ."
+            )
 
         if profile.type == 'custom_voice':
             return self._post(server, '/generate/custom', {
@@ -332,13 +365,13 @@ class Qwen3TTSProvider(BaseTTSProvider):
             }
             # Use cached voice prompt if available (faster + more consistent)
             if profile.prompt_path:
-                plugin_dir = Path(__file__).parent
-                prompt_full_path = plugin_dir / "voices" / profile.prompt_path
+                voice_dir = voice_manager.get_voice_dir(profile.type, profile.model_size)
+                prompt_full_path = voice_dir / profile.prompt_path
                 if prompt_full_path.exists():
                     payload['prompt_path'] = str(prompt_full_path)
                     return self._post(server, '/generate/clone', payload)
 
-            # Fallback to raw ref audio
+            # Fallback to raw ref audio (or forced by model size mismatch)
             payload['ref_audio'] = profile.ref_audio
             payload['ref_text'] = profile.ref_text or None
             payload['x_vector_only'] = profile.x_vector_only
@@ -362,10 +395,10 @@ class Qwen3TTSProvider(BaseTTSProvider):
         """
         def _do_cache():
             try:
-                plugin_dir = Path(__file__).parent
+                voice_dir = voice_manager.get_voice_dir(profile.type, profile.model_size)
                 pt_filename = f"{profile.id}.pt"
-                save_path = plugin_dir / "voices" / pt_filename
-                audio_path = plugin_dir / "voices" / "audio" / profile.ref_audio
+                save_path = voice_dir / pt_filename
+                audio_path = voice_dir / "audio" / profile.ref_audio
 
                 if not audio_path.exists():
                     logger.warning(f"[Qwen3-TTS] Auto-cache skipped: ref audio not found: {audio_path}")
@@ -393,7 +426,7 @@ class Qwen3TTSProvider(BaseTTSProvider):
 
     def _post(self, server: str, endpoint: str, payload: dict) -> Optional[bytes]:
         """POST to the Qwen3-TTS server with retry."""
-        delays = [0.5, 1.0, 2.0]
+        delays = [1.0, 2.0, 4.0, 8.0]
         last_error = None
 
         for attempt in range(1 + len(delays)):

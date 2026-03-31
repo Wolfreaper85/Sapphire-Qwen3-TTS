@@ -456,12 +456,15 @@ def _resolve_ref_audio_path(data):
         except Exception:
             return None
 
-    # File path (from voice manager audio dir)
+    # File path (search model-size subdirectories, then legacy flat dir)
     if isinstance(ref_audio, str):
-        audio_dir = os.path.join(script_dir, 'voices', 'audio')
-        audio_path = os.path.join(audio_dir, ref_audio)
-        if os.path.exists(audio_path):
-            return audio_path
+        for subdir in [os.path.join('voices', 'custom', 'audio'),
+                       os.path.join('voices', '0.6B', 'audio'),
+                       os.path.join('voices', '1.7B', 'audio'),
+                       os.path.join('voices', 'audio')]:
+            audio_path = os.path.join(script_dir, subdir, ref_audio)
+            if os.path.exists(audio_path):
+                return audio_path
 
     return None
 
@@ -482,17 +485,20 @@ def _decode_ref_audio(data):
         except Exception as e:
             return None, f"Failed to decode base64 audio: {e}"
 
-    # File path (from voice manager audio dir)
+    # File path (search model-size subdirectories, then legacy flat dir)
     if isinstance(ref_audio, str):
-        audio_dir = os.path.join(script_dir, 'voices', 'audio')
-        audio_path = os.path.join(audio_dir, ref_audio)
-        if os.path.exists(audio_path):
-            try:
-                wav, sr = sf.read(audio_path)
-                wav = _ensure_mono_float32(wav)
-                return (wav, sr), None
-            except Exception as e:
-                return None, f"Failed to read audio file: {e}"
+        for subdir in [os.path.join('voices', 'custom', 'audio'),
+                       os.path.join('voices', '0.6B', 'audio'),
+                       os.path.join('voices', '1.7B', 'audio'),
+                       os.path.join('voices', 'audio')]:
+            audio_path = os.path.join(script_dir, subdir, ref_audio)
+            if os.path.exists(audio_path):
+                try:
+                    wav, sr = sf.read(audio_path)
+                    wav = _ensure_mono_float32(wav)
+                    return (wav, sr), None
+                except Exception as e:
+                    return None, f"Failed to read audio file: {e}"
         return None, f"Audio file not found: {ref_audio}"
 
     return None, "Invalid ref_audio format"
