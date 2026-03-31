@@ -1,0 +1,481 @@
+/* Qwen3-TTS Voice Lab */
+
+.qwen3-voice-lab {
+    max-width: 740px;
+}
+
+/* ── Status Bar ── */
+.qwen3-status {
+    padding: 8px 12px;
+    margin-bottom: 16px;
+    border-radius: 6px;
+    background: var(--bg-secondary, #1a1a2e);
+    font-size: 0.85em;
+    color: var(--text-muted, #888);
+}
+.qwen3-status code {
+    background: var(--bg-tertiary, #252540);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+.qwen3-status-ok {
+    color: var(--success, #4caf50);
+    font-weight: 600;
+}
+.qwen3-status-err {
+    color: var(--danger, #f44336);
+    font-weight: 600;
+}
+
+/* ── Top Bar (Help + Status) ── */
+.qwen3-top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+.qwen3-help-btn {
+    padding: 5px 12px;
+    border: 1px solid var(--border, #333);
+    border-radius: 6px;
+    background: var(--bg-secondary, #1a1a2e);
+    color: var(--text-muted, #aaa);
+    cursor: pointer;
+    font-size: 0.85em;
+    transition: border-color 0.2s, color 0.2s;
+}
+.qwen3-help-btn:hover {
+    border-color: var(--accent, #7c5cbf);
+    color: var(--text, #eee);
+}
+
+/* ── How To Use Modal ── */
+.qwen3-modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.qwen3-modal {
+    background: var(--bg-primary, #0f0f23);
+    border: 1px solid var(--border, #333);
+    border-radius: 12px;
+    padding: 24px 28px;
+    max-width: 560px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    color: var(--text, #eee);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.qwen3-modal h3 {
+    margin: 0 0 16px;
+    font-size: 1.1em;
+    color: var(--accent, #7c5cbf);
+}
+.qwen3-modal-close {
+    float: right;
+    background: none;
+    border: none;
+    color: var(--text-muted, #888);
+    font-size: 1.3em;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+.qwen3-modal-close:hover {
+    color: var(--text, #eee);
+}
+.qwen3-modal ol {
+    padding-left: 20px;
+    line-height: 1.8;
+}
+.qwen3-modal li {
+    margin-bottom: 6px;
+}
+.qwen3-modal strong {
+    color: var(--accent, #7c5cbf);
+}
+.qwen3-modal .qwen3-tip {
+    margin-top: 14px;
+    padding: 10px 12px;
+    background: var(--bg-secondary, #1a1a2e);
+    border-radius: 6px;
+    font-size: 0.9em;
+    color: var(--text-muted, #aaa);
+}
+.qwen3-modal h4 {
+    margin-top: 18px;
+    margin-bottom: 8px;
+    font-size: 1em;
+    color: var(--text-primary, #eee);
+    border-bottom: 1px solid var(--border, #333);
+    padding-bottom: 4px;
+}
+.qwen3-modal ul {
+    padding-left: 20px;
+    line-height: 1.7;
+}
+.qwen3-modal ul li {
+    margin-bottom: 4px;
+}
+.qwen3-modal p {
+    line-height: 1.6;
+    margin: 6px 0;
+}
+.qwen3-help-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0 12px;
+    font-size: 0.9em;
+}
+.qwen3-help-table th,
+.qwen3-help-table td {
+    padding: 6px 10px;
+    border: 1px solid var(--border, #333);
+    text-align: center;
+}
+.qwen3-help-table th {
+    background: var(--bg-secondary, #1a1a2e);
+    color: var(--accent, #7c5cbf);
+    font-weight: 600;
+}
+.qwen3-help-table td:first-child {
+    text-align: left;
+    font-weight: 500;
+}
+
+/* ── Tabs ── */
+.qwen3-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 0;
+    border-bottom: 2px solid var(--border, #333);
+    padding-bottom: 0;
+}
+.qwen3-tab {
+    padding: 10px 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted, #888);
+    cursor: pointer;
+    font-size: 0.9em;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.2s, border-color 0.2s, background 0.2s;
+    border-radius: 6px 6px 0 0;
+}
+.qwen3-tab:hover {
+    color: var(--text, #eee);
+    background: rgba(255,255,255,0.03);
+}
+.qwen3-tab.active {
+    color: var(--accent, #7c5cbf);
+    border-bottom-color: var(--accent, #7c5cbf);
+    background: rgba(124, 92, 191, 0.08);
+}
+
+/* ── Panels ── */
+.qwen3-panel {
+    display: none;
+    padding: 20px;
+    background: var(--bg-primary, #0f0f23);
+    border: 1px solid var(--border, #333);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    margin-bottom: 8px;
+}
+.qwen3-panel.active {
+    display: block;
+}
+
+.qwen3-desc {
+    color: var(--text-muted, #999);
+    font-size: 0.9em;
+    margin: 0 0 16px;
+    line-height: 1.5;
+}
+.qwen3-desc em {
+    opacity: 0.7;
+}
+
+/* ── Section Dividers ── */
+.qwen3-section-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted, #666);
+    margin: 18px 0 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border, #2a2a40);
+}
+.qwen3-transcribe-btn {
+    font-size: 0.9em;
+    padding: 1px 8px;
+    text-transform: none;
+    letter-spacing: 0;
+    margin-left: auto;
+}
+.qwen3-use-as-ref-btn {
+    display: block;
+    margin-top: 8px;
+    font-size: 0.85em;
+}
+
+/* ── Form Elements ── */
+.qwen3-voice-lab label {
+    display: block;
+    font-size: 0.85em;
+    font-weight: 500;
+    color: var(--text, #eee);
+    margin: 12px 0 4px;
+}
+.qwen3-voice-lab label:first-child {
+    margin-top: 0;
+}
+
+.qwen3-voice-lab textarea,
+.qwen3-voice-lab select,
+.qwen3-voice-lab input[type="text"] {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border, #333);
+    border-radius: 6px;
+    background: var(--bg-secondary, #141428);
+    color: var(--text, #eee);
+    font-size: 0.9em;
+    font-family: inherit;
+    resize: vertical;
+    box-sizing: border-box;
+}
+.qwen3-voice-lab textarea:focus,
+.qwen3-voice-lab select:focus {
+    outline: none;
+    border-color: var(--accent, #7c5cbf);
+}
+
+/* ── Dropdown + Textarea combo ── */
+.qwen3-preset-group {
+    margin-bottom: 4px;
+}
+.qwen3-preset-group select {
+    margin-bottom: 6px;
+}
+.qwen3-preset-group textarea {
+    transition: opacity 0.2s;
+}
+.qwen3-preset-group textarea.qwen3-hidden {
+    display: none;
+}
+.qwen3-preset-group textarea[readonly] {
+    opacity: 0.85;
+    border-style: dashed;
+    cursor: default;
+}
+
+.qwen3-row {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+}
+.qwen3-field {
+    flex: 1;
+}
+.qwen3-field label {
+    margin-top: 0;
+}
+
+/* ── Upload Row ── */
+.qwen3-upload-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+}
+.qwen3-upload-row input[type="file"] {
+    flex: 1;
+    font-size: 0.85em;
+    min-width: 150px;
+}
+.qwen3-folder-btn {
+    padding: 4px 10px;
+    border: 1px solid var(--border, #333);
+    border-radius: 4px;
+    background: var(--bg-secondary, #1a1a2e);
+    color: var(--text-muted, #aaa);
+    cursor: pointer;
+    font-size: 0.82em;
+    transition: border-color 0.2s;
+}
+.qwen3-folder-btn:hover {
+    border-color: var(--accent, #7c5cbf);
+    color: var(--text, #eee);
+}
+
+/* ── Checkbox ── */
+.qwen3-checkbox-label {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85em;
+    cursor: pointer;
+    margin: 8px 0;
+}
+.qwen3-checkbox-label input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+}
+
+/* ── Actions ── */
+.qwen3-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border, #2a2a40);
+}
+.qwen3-actions .btn {
+    font-size: 0.9em;
+}
+.qwen3-save-note {
+    font-size: 0.8em;
+    color: var(--text-muted, #666);
+    margin-top: 6px;
+    font-style: italic;
+}
+
+/* ── Audio Player ── */
+.qwen3-audio-box {
+    margin-top: 10px;
+    min-height: 24px;
+}
+.qwen3-audio-box audio {
+    border-radius: 6px;
+}
+
+/* ── Error Text ── */
+.qwen3-error {
+    color: var(--danger, #f44336);
+    font-size: 0.9em;
+}
+
+/* ── Voice Library Cards ── */
+.qwen3-voice-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    border: 1px solid var(--border, #333);
+    border-radius: 8px;
+    background: var(--bg-secondary, #141428);
+    transition: border-color 0.2s;
+}
+.qwen3-voice-card:hover {
+    border-color: var(--accent, #7c5cbf);
+}
+
+.qwen3-voice-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.qwen3-voice-icon {
+    font-size: 1.4em;
+}
+.qwen3-voice-type {
+    display: inline-block;
+    font-size: 0.75em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--accent, #7c5cbf);
+    color: #fff;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+.qwen3-voice-detail {
+    font-size: 0.82em;
+    color: var(--text-muted, #888);
+    margin-top: 2px;
+    max-width: 350px;
+}
+
+.qwen3-voice-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.qwen3-voice-id {
+    font-size: 0.75em;
+    background: var(--bg-tertiary, #252540);
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--text-muted, #888);
+    user-select: all;
+}
+
+/* ── Library model-size sections ── */
+.qwen3-library-section {
+    margin-bottom: 16px;
+}
+.qwen3-library-section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border, #333);
+}
+.qwen3-library-section-title {
+    font-weight: 600;
+    font-size: 1em;
+    color: var(--text-primary, #eee);
+}
+.qwen3-library-section-count {
+    font-size: 0.8em;
+    color: var(--text-muted, #888);
+}
+.qwen3-library-section-active {
+    font-size: 0.7em;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #2d7a3a;
+    color: #fff;
+    margin-left: auto;
+}
+.qwen3-library-section-inactive {
+    font-size: 0.7em;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--bg-tertiary, #252540);
+    color: var(--text-muted, #888);
+    margin-left: auto;
+}
+.qwen3-voice-card-inactive {
+    opacity: 0.6;
+}
+.qwen3-voice-card-inactive:hover {
+    opacity: 0.85;
+}
+
+/* ── Library empty state ── */
+.qwen3-library-empty {
+    text-align: center;
+    padding: 30px 20px;
+    color: var(--text-muted, #666);
+}
+.qwen3-library-empty-icon {
+    font-size: 2.5em;
+    margin-bottom: 8px;
+    opacity: 0.5;
+}

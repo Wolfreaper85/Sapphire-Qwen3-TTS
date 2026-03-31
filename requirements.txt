@@ -1,0 +1,13 @@
+# Qwen3-TTS Plugin Dependencies
+#
+# NOTE: PyTorch is NOT listed here — it must be installed separately
+# with the correct CUDA version for your GPU. See README.md for details.
+
+qwen-tts>=0.1.0
+soundfile>=0.12.0
+numpy>=1.24.0
+psutil>=5.9.0
+requests>=2.28.0
+
+# Optional — 5-10x faster generation with CUDA graphs (auto-detected):
+# pip install faster-qwen3-tts
