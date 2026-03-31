@@ -6,6 +6,7 @@ Route handlers receive **kwargs with:
     {param}: str  — path parameters
 """
 import base64
+import json
 import logging
 import os
 import subprocess
@@ -293,6 +294,58 @@ async def get_status(**kwargs):
         return {"running": False, "error": "Server not running"}
     except Exception as e:
         return {"running": False, "error": str(e)}
+
+
+async def change_model_size(**kwargs):
+    """POST /api/plugin/qwen3-tts/change-model-size — switch model size and restart server.
+
+    Body: { "model_size": "0.6B" | "1.7B" }
+    Saves the setting and kills the current server so it relaunches with the new size.
+    """
+    body = kwargs.get("body", {})
+    new_size = body.get("model_size", "").strip()
+    if new_size not in ("0.6B", "1.7B"):
+        return {"error": f"Invalid model size: {new_size}. Must be '0.6B' or '1.7B'"}
+
+    try:
+        from core.plugin_loader import plugin_loader, PROJECT_ROOT
+        # Read current settings and update model_size
+        current = plugin_loader.get_plugin_settings('qwen3-tts') or {}
+        current['model_size'] = new_size
+
+        # Save via the standard settings path
+        settings_dir = PROJECT_ROOT / "user" / "webui" / "plugins"
+        settings_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = settings_dir / 'qwen3-tts.json'
+
+        with open(settings_file, 'w') as f:
+            json.dump(current, f, indent=2)
+
+        logger.info(f"[Qwen3-TTS] Model size changed to {new_size}")
+
+        # Kill the current server and relaunch with new size
+        try:
+            from core.process_manager import kill_process_on_port
+            port = int(current.get('server_port', 5013))
+            if kill_process_on_port(port):
+                logger.info(f"[Qwen3-TTS] Killed server on port {port} for model size switch")
+
+            # Brief pause for port to free, then relaunch via provider module
+            import time
+            time.sleep(1)
+            try:
+                from provider import _start_server
+                _start_server()
+                logger.info(f"[Qwen3-TTS] Relaunched server with {new_size}")
+            except Exception as e2:
+                logger.warning(f"[Qwen3-TTS] Auto-relaunch failed (will start on next generate): {e2}")
+        except Exception as e:
+            logger.warning(f"[Qwen3-TTS] Could not kill server for restart: {e}")
+
+        return {"status": "ok", "model_size": new_size, "message": f"Switched to {new_size}. Server restarting..."}
+    except Exception as e:
+        logger.error(f"[Qwen3-TTS] Failed to change model size: {e}")
+        return {"error": str(e)}
 
 
 async def open_folder(**kwargs):

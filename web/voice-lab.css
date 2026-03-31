@@ -27,6 +27,10 @@
     color: var(--danger, #f44336);
     font-weight: 600;
 }
+.qwen3-status-warn {
+    color: var(--warning, #ff9800);
+    font-weight: 600;
+}
 
 /* ── Top Bar (Help + Status) ── */
 .qwen3-top-bar {

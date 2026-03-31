@@ -1,6 +1,6 @@
 {
   "name": "qwen3-tts",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Qwen3-TTS \u2014 local AI text-to-speech with voice cloning, voice design, and preset voices",
   "author": "sapphire",
   "icon": "\ud83c\udfb5",
@@ -30,7 +30,8 @@
       {"method": "GET",  "path": "status",                "handler": "routes/api.py:get_status"},
       {"method": "POST", "path": "upload-ref",            "handler": "routes/api.py:upload_reference_audio"},
       {"method": "POST", "path": "open-folder",           "handler": "routes/api.py:open_folder"},
-      {"method": "POST", "path": "create-prompt",         "handler": "routes/api.py:create_prompt"}
+      {"method": "POST", "path": "create-prompt",         "handler": "routes/api.py:create_prompt"},
+      {"method": "POST", "path": "change-model-size",    "handler": "routes/api.py:change_model_size"}
     ],
     "settings": [
       {

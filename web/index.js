@@ -480,12 +480,84 @@ async function _checkStatus(container) {
             });
             const memInfo = d.memory_gb > 0 ? ` \u2014 ${d.memory_gb} GB RAM` : '';
             container._serverModelSize = d.model_size || '0.6B';
+            // Sync model size dropdowns to actual server value
+            _syncModelSizeDropdowns(container, container._serverModelSize);
             el.innerHTML = `<span class="qwen3-status-ok">\u2713 Server running</span> \u2014 ${d.model_size || '?'} on ${d.device || '?'}${memInfo}<br><span class="text-muted" style="font-size:0.85em">${parts.join(' &nbsp;\u2022&nbsp; ')}</span>`;
         } else {
             el.innerHTML = `<span class="qwen3-status-err">\u2717 Server not running</span> \u2014 It should auto-start when you select Qwen3-TTS as your TTS provider.`;
         }
     } catch {
         el.innerHTML = `<span class="qwen3-status-err">\u2717 Cannot reach server</span>`;
+    }
+}
+
+
+// ── Model Size Dropdown Logic ──
+
+function _syncModelSizeDropdowns(container, size) {
+    // Sync both clone and custom dropdowns to match the running server
+    // Only sync if user isn't mid-switch (avoid overwriting during restart)
+    if (container._modelSizeSwitching) return;
+    const cloneSel = container.querySelector('#qwen3-clone-model-size');
+    const customSel = container.querySelector('#qwen3-custom-model-size');
+    if (cloneSel && cloneSel.value !== size) cloneSel.value = size;
+    if (customSel && customSel.value !== size) customSel.value = size;
+}
+
+async function _onModelSizeChange(container, newSize) {
+    // Don't re-trigger if it's the same as the running server
+    if (newSize === container._serverModelSize) return;
+
+    container._modelSizeSwitching = true;
+
+    // Sync both dropdowns immediately
+    const cloneSel = container.querySelector('#qwen3-clone-model-size');
+    const customSel = container.querySelector('#qwen3-custom-model-size');
+    if (cloneSel) cloneSel.value = newSize;
+    if (customSel) customSel.value = newSize;
+
+    // Show restarting status
+    const el = container.querySelector('#qwen3-status');
+    if (el) el.innerHTML = `<span class="qwen3-status-warn">⟳ Switching to ${newSize}...</span> — Server restarting, models will reload (~30s)`;
+
+    // Disable generate buttons during restart
+    container.querySelectorAll('.qwen3-panel button[id$="-generate"]').forEach(b => b.disabled = true);
+
+    try {
+        const result = await _apiPost('change-model-size', { model_size: newSize });
+        if (result.error) {
+            if (el) el.innerHTML = `<span class="qwen3-status-err">✗ ${_esc(result.error)}</span>`;
+            container._modelSizeSwitching = false;
+            return;
+        }
+
+        // Poll for server to come back up with the new size
+        let attempts = 0;
+        const maxAttempts = 30; // 30 × 2s = 60s
+        const poll = setInterval(async () => {
+            attempts++;
+            try {
+                const r = await fetch(`${API}/status`);
+                const d = await r.json();
+                if (d.running && d.model_size === newSize) {
+                    clearInterval(poll);
+                    container._serverModelSize = newSize;
+                    container._modelSizeSwitching = false;
+                    container.querySelectorAll('.qwen3-panel button[id$="-generate"]').forEach(b => b.disabled = false);
+                    _checkStatus(container);
+                    _loadLibrary(container);
+                }
+            } catch {}
+            if (attempts >= maxAttempts) {
+                clearInterval(poll);
+                container._modelSizeSwitching = false;
+                container.querySelectorAll('.qwen3-panel button[id$="-generate"]').forEach(b => b.disabled = false);
+                if (el) el.innerHTML = `<span class="qwen3-status-err">✗ Server restart timed out</span> — Try generating to trigger auto-restart`;
+            }
+        }, 2000);
+    } catch (e) {
+        if (el) el.innerHTML = `<span class="qwen3-status-err">✗ ${_esc(e.message)}</span>`;
+        container._modelSizeSwitching = false;
     }
 }
 
@@ -618,6 +690,14 @@ function _attachListeners(container) {
         instruct: _getPresetValue(container, 'qwen3-custom-style-preset', 'qwen3-custom-instruct'),
         language: container.querySelector('#qwen3-custom-lang')?.value || 'English',
     }));
+
+    // Model size dropdowns — actually switch the server when changed
+    container.querySelector('#qwen3-clone-model-size')?.addEventListener('change', (e) => {
+        _onModelSizeChange(container, e.target.value);
+    });
+    container.querySelector('#qwen3-custom-model-size')?.addEventListener('change', (e) => {
+        _onModelSizeChange(container, e.target.value);
+    });
 
     // Mic recording
     _setupRecordButton(container);
