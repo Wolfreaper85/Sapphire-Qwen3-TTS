@@ -225,6 +225,11 @@
     letter-spacing: 0;
     margin-left: auto;
 }
+.qwen3-use-as-ref-btn {
+    display: block;
+    margin-top: 8px;
+    font-size: 0.85em;
+}
 
 /* ── Form Elements ── */
 .qwen3-voice-lab label {

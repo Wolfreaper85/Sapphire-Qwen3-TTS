@@ -651,6 +651,45 @@ function _attachGenerateBtn(container, tab, generateFn) {
                 _playAudio(audioBox, result.audio);
                 saveBtn.disabled = false;
                 container._lastAudioB64 = result.audio;
+
+                // Clone tab: add "Use as Reference" button to feed preview back as ref audio
+                if (tab === 'clone') {
+                    const useRefBtn = document.createElement('button');
+                    useRefBtn.className = 'btn btn-sm qwen3-use-as-ref-btn';
+                    useRefBtn.textContent = '\uD83D\uDD01 Use as Reference';
+                    useRefBtn.title = 'Use this preview as the new reference audio (cleaner clone)';
+                    useRefBtn.addEventListener('click', async () => {
+                        useRefBtn.disabled = true;
+                        useRefBtn.textContent = 'Uploading...';
+                        try {
+                            // Convert base64 audio to a File and set it as the ref input
+                            const blob = _b64toBlob(result.audio, 'audio/ogg');
+                            const file = new File([blob], 'preview_clone.ogg', { type: 'audio/ogg' });
+                            const dt = new DataTransfer();
+                            dt.items.add(file);
+                            container.querySelector('#qwen3-clone-file').files = dt.files;
+
+                            // Upload so it's saved for the profile
+                            const uploadRes = await _apiPost('upload-ref', {
+                                audio: result.audio,
+                                voice_type: 'voice_clone',
+                                model_size: container._serverModelSize || '0.6B'
+                            });
+                            if (uploadRes.filename) {
+                                container._cloneRefFilename = uploadRes.filename;
+                            }
+
+                            const info = container.querySelector('#qwen3-clone-file-info');
+                            if (info) info.textContent = 'Reference set from preview';
+                            useRefBtn.textContent = '\u2713 Reference Updated';
+                        } catch (e) {
+                            useRefBtn.textContent = 'Failed';
+                            console.error('[UseAsRef]', e);
+                        }
+                        setTimeout(() => useRefBtn.remove(), 2000);
+                    });
+                    audioBox.appendChild(useRefBtn);
+                }
             }
         } catch (e) {
             audioBox.innerHTML = `<span class="qwen3-error">\u2717 ${_esc(e.message)}</span>`;
