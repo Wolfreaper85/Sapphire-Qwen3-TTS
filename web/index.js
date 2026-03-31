@@ -240,6 +240,13 @@ function _showHelpModal() {
             <button class="qwen3-modal-close">&times;</button>
             <h3>\uD83C\uDFB5 How to Use the Voice Lab</h3>
 
+            <h4>First Time Setup</h4>
+            <p>If you haven't installed the dependencies yet, run the installer:</p>
+            <div class="qwen3-tip">
+                <button class="btn btn-sm" id="qwen3-help-run-installer" style="margin-right:8px">Open Installer Folder</button>
+                Double-click <strong>install.bat</strong> in the plugin folder. It auto-detects your GPU, installs PyTorch, and sets everything up.
+            </div>
+
             <h4>Getting Started</h4>
             <ol>
                 <li><strong>Pick a tab</strong> at the top to choose how you want to create a voice:
@@ -305,6 +312,17 @@ function _showHelpModal() {
     const close = () => overlay.remove();
     overlay.querySelector('.qwen3-modal-close').addEventListener('click', close);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    // "Open Installer Folder" button — opens the plugin directory in file explorer
+    overlay.querySelector('#qwen3-help-run-installer')?.addEventListener('click', async () => {
+        try {
+            await fetch(`${API}/open-folder`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                body: JSON.stringify({ target: 'plugin' })
+            });
+        } catch { /* ignore */ }
+    });
 }
 
 

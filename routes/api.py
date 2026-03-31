@@ -296,17 +296,25 @@ async def get_status(**kwargs):
 
 
 async def open_folder(**kwargs):
-    """POST /api/plugin/qwen3-tts/open-folder — open voices folder in file explorer."""
-    audio_dir = os.path.join(_plugin_dir, "voices")
-    os.makedirs(audio_dir, exist_ok=True)
+    """POST /api/plugin/qwen3-tts/open-folder — open a plugin folder in file explorer.
+
+    Body: { "target": "voices" | "plugin" }  (default: "voices")
+    """
+    body = kwargs.get("body", {})
+    target = body.get("target", "voices")
+    if target == "plugin":
+        folder = _plugin_dir
+    else:
+        folder = os.path.join(_plugin_dir, "voices")
+    os.makedirs(folder, exist_ok=True)
     try:
         if sys.platform == "win32":
-            os.startfile(audio_dir)
+            os.startfile(folder)
         elif sys.platform == "darwin":
-            subprocess.Popen(["open", audio_dir])
+            subprocess.Popen(["open", folder])
         else:
-            subprocess.Popen(["xdg-open", audio_dir])
-        return {"status": "ok", "path": audio_dir}
+            subprocess.Popen(["xdg-open", folder])
+        return {"status": "ok", "path": folder}
     except Exception as e:
         return {"error": str(e)}
 
