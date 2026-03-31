@@ -708,7 +708,12 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
             from dataclasses import asdict
 
             with generation_lock:
-                items = model.create_voice_clone_prompt(
+                # FasterQwen3TTS wraps the standard model as .model
+                # Use the inner model's create_voice_clone_prompt if the wrapper doesn't have it
+                prompt_model = model
+                if not hasattr(model, 'create_voice_clone_prompt') and hasattr(model, 'model'):
+                    prompt_model = model.model
+                items = prompt_model.create_voice_clone_prompt(
                     ref_audio=ref_audio_tuple,
                     ref_text=ref_text,
                     x_vector_only_mode=bool(x_vector_only),
