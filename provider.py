@@ -66,16 +66,50 @@ def _server_is_healthy():
         return False
 
 
+def _server_matches_settings():
+    """Check if the running server's config matches current plugin settings.
+
+    Returns True if the server is running with the expected model_size.
+    If not, returns False so the caller can kill and relaunch.
+    """
+    try:
+        r = requests.get(f"{_server_url()}/health", timeout=2.0)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        settings = _get_settings()
+        expected_size = settings.get('model_size', '0.6B')
+        running_size = data.get('model_size', '')
+        if running_size != expected_size:
+            logger.warning(
+                f"[Qwen3-TTS] Server mismatch: running {running_size}, settings want {expected_size}"
+            )
+            return False
+        return True
+    except Exception:
+        return False
+
+
 def _start_server():
     """Start the Qwen3-TTS subprocess server if not already running."""
     global _server_manager
 
-    # Already running?
+    # Already running and managed by us?
     if _server_manager and _server_manager.is_running():
         return
+
+    # External server already on the port? Check if it matches our settings.
     if _server_is_healthy():
-        logger.info("[Qwen3-TTS] Server already running (external)")
-        return
+        if _server_matches_settings():
+            logger.info("[Qwen3-TTS] Server already running (external, settings match)")
+            return
+        else:
+            # Settings changed (e.g. model_size switched) — kill stale server
+            logger.warning("[Qwen3-TTS] Killing stale server (settings mismatch)...")
+            port = _get_port()
+            if kill_process_on_port(port):
+                logger.info(f"[Qwen3-TTS] Killed stale server on port {port}")
+            time.sleep(1)  # Brief pause for port to free up
 
     plugin_dir = Path(__file__).parent
     server_script = plugin_dir / "server.py"
@@ -95,7 +129,7 @@ def _start_server():
     env = os.environ.copy()
     env['QWEN3_TTS_PORT'] = str(port)
     env['QWEN3_TTS_DEVICE'] = settings.get('device', 'cuda:0')
-    env['QWEN3_TTS_MODEL_SIZE'] = settings.get('model_size', '1.7B')
+    env['QWEN3_TTS_MODEL_SIZE'] = settings.get('model_size', '0.6B')
     env['QWEN3_TTS_LOAD_MODELS'] = settings.get('load_models', 'all')
     env['QWEN3_TTS_OFFLOAD_TIMEOUT'] = str(settings.get('offload_timeout', '60'))
 
@@ -111,11 +145,16 @@ def _start_server():
         log_name="qwen3-tts",
         base_dir=base_dir,
     )
-    # Inject env vars into the subprocess command
     _server_manager._env = env
 
-    # Override start() to pass env — ProcessManager doesn't natively support env
-    _start_with_env(_server_manager, env)
+    # Monkey-patch start() so both initial launch AND monitor_and_restart()
+    # use our custom env vars.  Without this, the monitor's self.start()
+    # launches without env vars and the server falls back to defaults.
+    def _patched_start():
+        _start_with_env(_server_manager, env)
+    _server_manager.start = _patched_start
+
+    _server_manager.start()
     _server_manager.monitor_and_restart(check_interval=15)
 
     # Don't block — the server loads models in the background.

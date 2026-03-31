@@ -401,10 +401,32 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
         except Exception:
             mem_gb = -1
 
+        # GPU VRAM usage
+        gpu_info = {}
+        try:
+            import torch
+            if torch.cuda.is_available():
+                gpu_info['vram_allocated_gb'] = round(torch.cuda.memory_allocated() / (1024**3), 2)
+                gpu_info['vram_reserved_gb'] = round(torch.cuda.memory_reserved() / (1024**3), 2)
+                total = torch.cuda.get_device_properties(0).total_mem
+                gpu_info['vram_total_gb'] = round(total / (1024**3), 2)
+        except Exception:
+            pass
+
         model_status = {}
         for k in models:
             if models[k] is not None:
-                model_status[k] = 'gpu'
+                status = 'gpu'
+                # Check if Accelerate split layers across devices
+                try:
+                    dmap = getattr(models[k].model, 'hf_device_map', None)
+                    if dmap:
+                        devices_used = set(str(v) for v in dmap.values())
+                        if len(devices_used) > 1 or 'cpu' in devices_used:
+                            status = f'split:{",".join(sorted(devices_used))}'
+                except Exception:
+                    pass
+                model_status[k] = status
             elif models_cpu[k] is not None:
                 model_status[k] = 'cpu'
             else:
@@ -419,6 +441,7 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
             'device': DEVICE,
             'requests': request_count,
             'memory_gb': round(mem_gb, 2),
+            'gpu': gpu_info,
         })
 
     def _handle_custom_voice(self):
@@ -551,7 +574,10 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                     x_vector_only_mode=bool(x_vector_only),
                 )
 
-            payload = {"items": [asdict(it) for it in items]}
+            payload = {
+                "items": [asdict(it) for it in items],
+                "model_size": MODEL_SIZE,  # Tag so mismatched caches are rejected
+            }
 
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             torch.save(payload, save_path)
@@ -595,6 +621,24 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                 from qwen_tts.inference.qwen3_tts_model import VoiceClonePromptItem
 
                 payload = torch.load(prompt_path, map_location="cpu", weights_only=True)
+
+                # Validate that cached prompt matches current model size.
+                # 1.7B uses 2048-dim speaker embeddings, 0.6B uses 1024-dim.
+                # A mismatch causes "Sizes of tensors must match" errors.
+                cache_model_size = payload.get("model_size", None)
+                if cache_model_size and cache_model_size != MODEL_SIZE:
+                    logger.warning(
+                        f"Cached prompt was created with {cache_model_size} but server "
+                        f"is running {MODEL_SIZE} — ignoring cache, using raw ref audio"
+                    )
+                    prompt_path = None  # fall through to raw ref audio path below
+
+            if prompt_path and os.path.exists(prompt_path):
+                import torch
+                from qwen_tts.inference.qwen3_tts_model import VoiceClonePromptItem
+
+                if 'payload' not in locals():
+                    payload = torch.load(prompt_path, map_location="cpu", weights_only=True)
                 items_raw = payload.get("items", [])
                 items = []
                 for d in items_raw:
