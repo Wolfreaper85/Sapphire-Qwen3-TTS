@@ -121,22 +121,128 @@ def _get_attn_impl():
         return None
 
 
+def _try_faster_backend():
+    """Check if faster-qwen3-tts is available."""
+    try:
+        from faster_qwen3_tts import FasterQwen3TTS
+        logger.info("faster-qwen3-tts detected — using CUDA graph acceleration (5-10x speedup)")
+        return True
+    except ImportError:
+        logger.info("faster-qwen3-tts not installed — using standard qwen_tts backend")
+        return False
+
+
+USE_FASTER = False  # Set at load time
+
+
 def load_models():
     """Load Qwen3-TTS models. Only loads models specified by LOAD_MODELS config."""
-    global AUDIO_SAMPLE_RATE
+    global AUDIO_SAMPLE_RATE, USE_FASTER
 
     try:
         import torch
+    except ImportError as e:
+        logger.error(f"Failed to import torch: {e}")
+        sys.exit(1)
+
+    USE_FASTER = _try_faster_backend()
+
+    dtype = torch.bfloat16
+    attn_impl = _get_attn_impl()
+
+    # CUDA graphs are incompatible with Flash Attention 2 — the graph capture
+    # fails with "Offset increment outside graph capture encountered unexpectedly".
+    # Force SDPA when using the faster backend.
+    if USE_FASTER and attn_impl == "flash_attention_2":
+        logger.info("Overriding flash_attention_2 → sdpa (required for CUDA graph capture)")
+        attn_impl = "sdpa"
+
+    logger.info(f"Model loading config: LOAD_MODELS={LOAD_MODELS}")
+
+    if USE_FASTER:
+        _load_models_faster(dtype, attn_impl)
+    else:
+        _load_models_standard(dtype, attn_impl)
+
+    loaded = [k for k, v in models.items() if v is not None]
+    logger.info(f"Models loaded: {', '.join(loaded) or 'none'}")
+    if USE_FASTER:
+        logger.info("Backend: faster-qwen3-tts (CUDA graphs + static KV cache)")
+    else:
+        logger.info("Backend: standard qwen_tts")
+
+    # Mark all loaded models as recently used
+    now = time.time()
+    for k in loaded:
+        model_last_used[k] = now
+
+    # Start the offload timer (only for standard backend — faster backend doesn't support CPU offload)
+    if OFFLOAD_TIMEOUT > 0 and not USE_FASTER:
+        _start_offload_timer()
+
+
+def _load_models_faster(dtype, attn_impl):
+    """Load models using faster-qwen3-tts with CUDA graph acceleration."""
+    from faster_qwen3_tts import FasterQwen3TTS
+
+    attn_kwarg = attn_impl if attn_impl else "sdpa"
+
+    # CustomVoice model
+    if _should_load('custom_voice'):
+        logger.info(f"Loading CustomVoice model ({MODEL_SIZE}) with CUDA graphs...")
+        try:
+            models['custom_voice'] = FasterQwen3TTS.from_pretrained(
+                f"Qwen/Qwen3-TTS-12Hz-{MODEL_SIZE}-CustomVoice",
+                device=DEVICE, dtype=dtype, attn_implementation=attn_kwarg,
+            )
+            logger.info("CustomVoice model loaded (faster)")
+        except Exception as e:
+            logger.error(f"Failed to load CustomVoice model (faster): {e}", exc_info=True)
+    else:
+        logger.info("Skipping CustomVoice model (not in LOAD_MODELS)")
+
+    # VoiceDesign model (1.7B only)
+    if _should_load('voice_design'):
+        if MODEL_SIZE == '1.7B':
+            logger.info("Loading VoiceDesign model (1.7B) with CUDA graphs...")
+            try:
+                models['voice_design'] = FasterQwen3TTS.from_pretrained(
+                    "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+                    device=DEVICE, dtype=dtype, attn_implementation=attn_kwarg,
+                )
+                logger.info("VoiceDesign model loaded (faster)")
+            except Exception as e:
+                logger.error(f"Failed to load VoiceDesign model (faster): {e}", exc_info=True)
+        else:
+            logger.info("Skipping VoiceDesign model (requires 1.7B)")
+    else:
+        logger.info("Skipping VoiceDesign model (not in LOAD_MODELS)")
+
+    # Base model (voice cloning)
+    if _should_load('base'):
+        logger.info(f"Loading Base model ({MODEL_SIZE}) with CUDA graphs...")
+        try:
+            models['base'] = FasterQwen3TTS.from_pretrained(
+                f"Qwen/Qwen3-TTS-12Hz-{MODEL_SIZE}-Base",
+                device=DEVICE, dtype=dtype, attn_implementation=attn_kwarg,
+            )
+            logger.info("Base (clone) model loaded (faster)")
+        except Exception as e:
+            logger.error(f"Failed to load Base model (faster): {e}", exc_info=True)
+    else:
+        logger.info("Skipping Base model (not in LOAD_MODELS)")
+
+
+def _load_models_standard(dtype, attn_impl):
+    """Load models using standard qwen_tts backend (fallback)."""
+    try:
         from qwen_tts import Qwen3TTSModel
     except ImportError as e:
         logger.error(f"Failed to import qwen_tts: {e}")
         logger.error("Install with: pip install -U qwen-tts")
         sys.exit(1)
 
-    dtype = torch.bfloat16
-    attn_impl = _get_attn_impl()
     attn_kwargs = {"attn_implementation": attn_impl} if attn_impl else {}
-    logger.info(f"Model loading config: LOAD_MODELS={LOAD_MODELS}")
 
     # CustomVoice model (preset speakers + instruction control)
     if _should_load('custom_voice'):
@@ -182,14 +288,6 @@ def load_models():
             logger.error(f"Failed to load Base model: {e}")
     else:
         logger.info("Skipping Base model (not in LOAD_MODELS)")
-
-    loaded = [k for k, v in models.items() if v is not None]
-    logger.info(f"Models loaded: {', '.join(loaded) or 'none'}")
-
-    # Mark all loaded models as recently used
-    now = time.time()
-    for k in loaded:
-        model_last_used[k] = now
 
     # Start the offload timer
     if OFFLOAD_TIMEOUT > 0:
@@ -337,6 +435,37 @@ def _ensure_mono_float32(wav):
     return wav
 
 
+def _resolve_ref_audio_path(data):
+    """Resolve reference audio to a file path (for faster backend).
+
+    Handles base64 by saving to temp file, or returns existing path.
+    Returns file path string or None.
+    """
+    ref_audio = data.get('ref_audio')
+    if not ref_audio:
+        return None
+
+    # Base64 encoded audio — save to temp file
+    if isinstance(ref_audio, str) and len(ref_audio) > 200:
+        try:
+            audio_bytes = base64.b64decode(ref_audio)
+            temp_path = os.path.join(TEMP_DIR, f'ref_{uuid.uuid4().hex[:8]}.wav')
+            with open(temp_path, 'wb') as f:
+                f.write(audio_bytes)
+            return temp_path
+        except Exception:
+            return None
+
+    # File path (from voice manager audio dir)
+    if isinstance(ref_audio, str):
+        audio_dir = os.path.join(script_dir, 'voices', 'audio')
+        audio_path = os.path.join(audio_dir, ref_audio)
+        if os.path.exists(audio_path):
+            return audio_path
+
+    return None
+
+
 def _decode_ref_audio(data):
     """Decode reference audio from base64 or file path. Returns (wav_np, sr) tuple."""
     ref_audio = data.get('ref_audio')
@@ -439,6 +568,7 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
             'offload_timeout': OFFLOAD_TIMEOUT,
             'model_size': MODEL_SIZE,
             'device': DEVICE,
+            'backend': 'faster-qwen3-tts' if USE_FASTER else 'standard',
             'requests': request_count,
             'memory_gb': round(mem_gb, 2),
             'gpu': gpu_info,
@@ -472,7 +602,7 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
         t0 = time.time()
         try:
             with generation_lock:
-                wavs, sr = model.generate_custom_voice(
+                result = model.generate_custom_voice(
                     text=text,
                     language=language,
                     speaker=speaker,
@@ -481,11 +611,13 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                     max_new_tokens=MAX_NEW_TOKENS,
                 )
                 model_last_used['custom_voice'] = time.time()
+
+            wavs, sr = result
             elapsed = time.time() - t0
-            logger.info(f"CustomVoice generated in {elapsed:.2f}s (speaker={speaker})")
-            _audio_response(self, wavs[0], sr)
+            logger.info(f"CustomVoice generated in {elapsed:.2f}s (speaker={speaker}, backend={'faster' if USE_FASTER else 'standard'})")
+            _audio_response(self, wavs[0] if isinstance(wavs, list) else wavs, sr)
         except Exception as e:
-            logger.error(f"CustomVoice generation failed: {e}")
+            logger.error(f"CustomVoice generation failed: {e}", exc_info=True)
             _json_response(self, {'error': str(e)}, 500)
 
     def _handle_voice_design(self):
@@ -519,7 +651,7 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
         t0 = time.time()
         try:
             with generation_lock:
-                wavs, sr = model.generate_voice_design(
+                result = model.generate_voice_design(
                     text=text,
                     language=language,
                     instruct=instruct,
@@ -527,11 +659,13 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                     max_new_tokens=MAX_NEW_TOKENS,
                 )
                 model_last_used['voice_design'] = time.time()
+
+            wavs, sr = result
             elapsed = time.time() - t0
-            logger.info(f"VoiceDesign generated in {elapsed:.2f}s")
-            _audio_response(self, wavs[0], sr)
+            logger.info(f"VoiceDesign generated in {elapsed:.2f}s (backend={'faster' if USE_FASTER else 'standard'})")
+            _audio_response(self, wavs[0] if isinstance(wavs, list) else wavs, sr)
         except Exception as e:
-            logger.error(f"VoiceDesign generation failed: {e}")
+            logger.error(f"VoiceDesign generation failed: {e}", exc_info=True)
             _json_response(self, {'error': str(e)}, 500)
 
     def _handle_create_prompt(self):
@@ -657,45 +791,69 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                     ))
 
                 with generation_lock:
-                    wavs, sr = model.generate_voice_clone(
+                    result = model.generate_voice_clone(
                         text=text,
                         language=language,
                         voice_clone_prompt=items,
+                        non_streaming_mode=True if not USE_FASTER else False,
+                        max_new_tokens=MAX_NEW_TOKENS,
+                    )
+                    model_last_used['base'] = time.time()
+
+                wavs, sr = result
+                elapsed = time.time() - t0
+                logger.info(f"VoiceClone (cached prompt) generated in {elapsed:.2f}s (backend={'faster' if USE_FASTER else 'standard'})")
+                _audio_response(self, wavs[0] if isinstance(wavs, list) else wavs, sr)
+                return
+
+            # --- Fallback: raw ref audio (preview mode) ---
+            ref_text = (data.get('ref_text') or '').strip() or None
+            x_vector_only = data.get('x_vector_only', False)
+
+            if USE_FASTER:
+                # Faster backend takes ref_audio as a file path string
+                ref_audio_path = _resolve_ref_audio_path(data)
+                if not ref_audio_path:
+                    _json_response(self, {'error': 'No reference audio or cached prompt provided'}, 400)
+                    return
+
+                with generation_lock:
+                    result = model.generate_voice_clone(
+                        text=text,
+                        language=language,
+                        ref_audio=ref_audio_path,
+                        ref_text=ref_text or '',
+                        xvec_only=x_vector_only,
+                        non_streaming_mode=False,
+                        max_new_tokens=MAX_NEW_TOKENS,
+                    )
+                    model_last_used['base'] = time.time()
+                wavs, sr = result
+            else:
+                # Standard backend takes ref_audio as (wav_np, sr) tuple
+                ref_audio_tuple, audio_err = _decode_ref_audio(data)
+                if audio_err:
+                    _json_response(self, {'error': audio_err}, 400)
+                    return
+                if ref_audio_tuple is None:
+                    _json_response(self, {'error': 'No reference audio or cached prompt provided'}, 400)
+                    return
+
+                with generation_lock:
+                    wavs, sr = model.generate_voice_clone(
+                        text=text,
+                        language=language,
+                        ref_audio=ref_audio_tuple,
+                        ref_text=ref_text,
+                        x_vector_only_mode=x_vector_only,
                         non_streaming_mode=True,
                         max_new_tokens=MAX_NEW_TOKENS,
                     )
                     model_last_used['base'] = time.time()
-                elapsed = time.time() - t0
-                logger.info(f"VoiceClone (cached prompt) generated in {elapsed:.2f}s")
-                _audio_response(self, wavs[0], sr)
-                return
 
-            # --- Fallback: raw ref audio (preview mode) ---
-            ref_audio_tuple, audio_err = _decode_ref_audio(data)
-            if audio_err:
-                _json_response(self, {'error': audio_err}, 400)
-                return
-            if ref_audio_tuple is None:
-                _json_response(self, {'error': 'No reference audio or cached prompt provided'}, 400)
-                return
-
-            ref_text = (data.get('ref_text') or '').strip() or None
-            x_vector_only = data.get('x_vector_only', False)
-
-            with generation_lock:
-                wavs, sr = model.generate_voice_clone(
-                    text=text,
-                    language=language,
-                    ref_audio=ref_audio_tuple,
-                    ref_text=ref_text,
-                    x_vector_only_mode=x_vector_only,
-                    non_streaming_mode=True,
-                    max_new_tokens=MAX_NEW_TOKENS,
-                )
-                model_last_used['base'] = time.time()
             elapsed = time.time() - t0
-            logger.info(f"VoiceClone (raw ref) generated in {elapsed:.2f}s")
-            _audio_response(self, wavs[0], sr)
+            logger.info(f"VoiceClone (raw ref) generated in {elapsed:.2f}s (backend={'faster' if USE_FASTER else 'standard'})")
+            _audio_response(self, wavs[0] if isinstance(wavs, list) else wavs, sr)
         except Exception as e:
             logger.error(f"VoiceClone generation failed: {e}")
             _json_response(self, {'error': str(e)}, 500)

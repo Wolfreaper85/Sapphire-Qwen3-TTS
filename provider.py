@@ -253,10 +253,11 @@ class Qwen3TTSProvider(BaseTTSProvider):
             return self._generate_from_profile(server, text, profile_id, clamped_speed)
 
         else:
-            # Non-qwen3 voice ID — use as speaker name or fall back to default
-            speaker = voice if voice else DEFAULT_SPEAKER
-            logger.warning(f"[Qwen3-TTS] -> non-qwen3 voice '{voice}', using as speaker: {speaker}")
-            return self._generate_custom(server, text, speaker, kwargs.get('instruct'), clamped_speed)
+            # Non-qwen3 voice ID — always fall back to DEFAULT_SPEAKER.
+            # Unknown voices (af_heart, f5:xxx, empty string, etc.) should
+            # never be sent as a CustomVoice speaker name.
+            logger.warning(f"[Qwen3-TTS] -> non-qwen3 voice '{voice}', falling back to default speaker: {DEFAULT_SPEAKER}")
+            return self._generate_custom(server, text, DEFAULT_SPEAKER, kwargs.get('instruct'), clamped_speed)
 
     def _generate_custom(self, server: str, text: str, speaker: str,
                          instruct: Optional[str], speed: float) -> Optional[bytes]:
