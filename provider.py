@@ -404,6 +404,16 @@ class Qwen3TTSProvider(BaseTTSProvider):
 
     def list_voices(self) -> list:
         """Return all available voices (saved profiles + presets)."""
+        return self._load_voices()
+
+    @classmethod
+    def list_voices_static(cls) -> list:
+        """Return voices without needing a provider instance (no server spin-up)."""
+        return cls._load_voices()
+
+    @staticmethod
+    def _load_voices() -> list:
+        """Shared voice listing logic for instance and static methods."""
         try:
             from voice_manager import voice_manager
         except ImportError:
