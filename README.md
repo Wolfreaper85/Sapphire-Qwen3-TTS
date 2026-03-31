@@ -123,6 +123,30 @@ Saved voices appear in the persona voice dropdown when Qwen3-TTS is set as the a
 | Model Size | 1.7B | `1.7B` (full quality) or `0.6B` (lighter, less VRAM) |
 | Server Port | 5013 | Port for the TTS subprocess server |
 | Device | cuda:0 | GPU device (`cuda:0`, `cuda:1`, or `cpu`) |
+| Models to Load | All | Which models to load at startup. Idle models auto-offload to CPU after the timeout. |
+| Offload Timeout | 60 | Seconds of inactivity before an idle model moves from GPU to CPU. Set 0 to disable. |
+
+## Important Notes
+
+### Model Size and Saved Voices
+
+**Saved clone voices are tied to the model size they were created with.** A voice cloned on the 1.7B model will not work correctly if you switch to 0.6B (and vice versa). If you change the Model Size setting, you will need to re-clone your voices.
+
+This applies to **cloned voices only** — preset speakers (Ryan, Serena, etc.) work with either model size.
+
+### Auto-Offload (VRAM Management)
+
+All three models load at startup (~15 GB total for 1.7B). After 60 seconds of inactivity, unused models automatically move to CPU RAM to free GPU memory. When a request comes in for an offloaded model, it reloads to GPU in ~2-3 seconds.
+
+In practice: if you're only chatting with personas using cloned voices, the Design and CustomVoice models offload automatically, leaving the full GPU for the Base (clone) model. When you open Voice Lab to create new voices, the needed models reload on demand.
+
+### Voice Clone Prompt Caching
+
+When you save a cloned voice, a `.pt` file is created containing the pre-computed voice fingerprint (speaker embedding + reference codes). This means:
+- Persona TTS calls are **faster** (no re-encoding audio each time)
+- Voice output is **more consistent** across different sentences
+- The cache is created once at save time and reused forever
+- If you delete a voice, the `.pt` cache is cleaned up automatically
 
 ## File Structure
 

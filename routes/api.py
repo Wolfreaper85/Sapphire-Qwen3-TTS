@@ -58,12 +58,39 @@ async def get_voice(**kwargs):
 
 
 async def save_voice(**kwargs):
-    """POST /api/plugin/qwen3-tts/voices — save a voice profile."""
+    """POST /api/plugin/qwen3-tts/voices — save a voice profile.
+
+    For clone voices, also pre-computes the voice_clone_prompt (.pt file)
+    so persona TTS uses a cached embedding instead of re-encoding audio every time.
+    """
     body = kwargs.get("body", {})
     if not body.get("name"):
         return {"error": "Voice name is required"}
 
     profile = voice_manager.save_voice(body)
+
+    # Auto-create cached voice prompt for clone voices
+    if profile.type == 'voice_clone' and profile.ref_audio:
+        try:
+            prompt_path = os.path.join(_plugin_dir, "voices", f"{profile.id}.pt")
+            server = _server_url()
+            r = requests.post(f"{server}/create-prompt", json={
+                "ref_audio": profile.ref_audio,
+                "ref_text": profile.ref_text or None,
+                "x_vector_only": profile.x_vector_only,
+                "save_path": prompt_path,
+            }, timeout=60)
+            if r.status_code == 200:
+                # Update profile with prompt path
+                profile.prompt_path = os.path.basename(prompt_path)
+                voice_manager.save_voice(profile.to_dict())
+                logger.info(f"Voice clone prompt cached for {profile.id}")
+            else:
+                logger.warning(f"Failed to cache voice prompt: {r.status_code}")
+        except Exception as e:
+            logger.warning(f"Failed to cache voice prompt: {e}")
+            # Non-fatal — voice still works, just slower without cache
+
     return {"status": "saved", "voice": profile.to_dict()}
 
 
@@ -203,6 +230,49 @@ async def generate_preview(**kwargs):
         return await generate_voice_clone(**kwargs)
     else:
         return await generate_custom_voice(**kwargs)
+
+
+# =============================================================================
+# Voice Prompt Caching
+# =============================================================================
+
+async def create_prompt(**kwargs):
+    """POST /api/plugin/qwen3-tts/create-prompt — pre-compute voice clone prompt.
+
+    Creates a .pt file with cached speaker embeddings so persona TTS
+    doesn't re-encode reference audio on every request.
+    """
+    body = kwargs.get("body", {})
+    ref_audio = body.get("ref_audio", "")
+    ref_text = body.get("ref_text")
+    x_vector_only = body.get("x_vector_only", False)
+    save_path = body.get("save_path", "")
+
+    if not ref_audio:
+        return {"error": "ref_audio is required"}
+    if not save_path:
+        return {"error": "save_path is required"}
+
+    server = _server_url()
+    try:
+        r = requests.post(f"{server}/create-prompt", json={
+            "ref_audio": ref_audio,
+            "ref_text": ref_text,
+            "x_vector_only": x_vector_only,
+            "save_path": save_path,
+        }, timeout=60)
+        if r.status_code == 200:
+            return r.json()
+        err = "Failed to create voice prompt"
+        try:
+            err = r.json().get("error", err)
+        except Exception:
+            pass
+        return {"error": err}
+    except requests.ConnectionError:
+        return {"error": "Qwen3-TTS server not running."}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # =============================================================================

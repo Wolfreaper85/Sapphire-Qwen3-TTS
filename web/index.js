@@ -29,6 +29,21 @@ const VOICE_DESCRIPTIONS = [
 ];
 
 // ── Preset style instructions (for Custom Voice dropdown) ──
+// ── Preset reference texts (for Voice Clone — what to read aloud) ──
+const CLONE_REF_TEXTS = [
+    { label: '-- Select a sample or write your own --', value: '' },
+    { label: 'Pangram — The Quick Brown Fox', value: 'The quick brown fox jumps over the lazy dog near the river bank.' },
+    { label: 'Pangram — Pack My Box', value: 'Pack my box with five dozen liquor jugs.' },
+    { label: 'Introduction', value: 'Hello, my name is Sarah and I love spending time outdoors on sunny days.' },
+    { label: 'Weather Report', value: 'Today will be mostly sunny with a high of seventy-five degrees and light winds from the west.' },
+    { label: 'Storytelling', value: 'Once upon a time, in a village nestled between the mountains and the sea, there lived a curious young explorer.' },
+    { label: 'Technical', value: 'The system processes approximately two thousand requests per second using a distributed architecture.' },
+    { label: 'Enthusiastic', value: 'Oh wow, this is absolutely incredible! I cannot believe how amazing this turned out!' },
+    { label: 'Calm & Measured', value: 'Take a deep breath. Relax your shoulders. Let go of any tension you might be holding.' },
+    { label: 'Conversational', value: 'So anyway, I was telling them about the trip we took last summer and they could not stop laughing.' },
+    { label: 'Custom (write your own)', value: '__custom__' },
+];
+
 const STYLE_INSTRUCTIONS = [
     { label: '-- No style instruction --', value: '' },
     { label: 'Calm & Relaxed', value: 'Speak in a calm, relaxed manner with a steady pace' },
@@ -105,8 +120,11 @@ registerPluginSettings({
                         <span id="qwen3-clone-file-info" class="text-muted"></span>
                     </div>
 
-                    <label>Reference Text <span class="text-muted">(what is said in the audio clip)</span></label>
-                    <textarea id="qwen3-clone-ref-text" rows="2" placeholder="Type the exact words spoken in the reference audio..."></textarea>
+                    <div class="qwen3-section-label">Reference Text <span class="text-muted">(read this aloud for your recording)</span></div>
+                    <div class="qwen3-preset-group">
+                        <select id="qwen3-clone-ref-preset">${CLONE_REF_TEXTS.map(d => `<option value="${_esc(d.value)}">${_esc(d.label)}</option>`).join('')}</select>
+                        <textarea id="qwen3-clone-ref-text" rows="2" placeholder="Type the exact words you are saying in the reference audio..."></textarea>
+                    </div>
 
                     <label class="qwen3-checkbox-label">
                         <input type="checkbox" id="qwen3-clone-xvector" />
@@ -236,7 +254,16 @@ function _showHelpModal() {
                 <strong>Tip:</strong> Previews are temporary and won't be saved unless you click "Save Voice". You can generate as many previews as you want before saving.
             </div>
             <div class="qwen3-tip" style="margin-top:8px">
-                <strong>Tip:</strong> For voice cloning, a clean 3-10 second recording with no background noise works best. Speak clearly and naturally.
+                <strong>Tip:</strong> For voice cloning, a clean 3-10 second recording with no background noise works best. Speak clearly and naturally. 8-10 seconds is ideal.
+            </div>
+            <div class="qwen3-tip" style="margin-top:8px">
+                <strong>Tip:</strong> Set persona pitch to <strong>1.0</strong> for cloned voices. The clone already captured your exact pitch \u2014 any shift will distort it.
+            </div>
+            <div class="qwen3-tip" style="margin-top:8px">
+                <strong>Important:</strong> Saved clone voices are tied to the model size (1.7B or 0.6B) they were created with. If you switch model sizes in settings, you\u2019ll need to re-clone your voices.
+            </div>
+            <div class="qwen3-tip" style="margin-top:8px">
+                <strong>VRAM:</strong> Idle models auto-offload from GPU to CPU after 60 seconds. They reload automatically when needed (~2-3s). You don\u2019t need to manage this manually.
             </div>
         </div>
     `;
@@ -334,9 +361,13 @@ async function _checkStatus(container) {
         const r = await fetch(`${API}/status`);
         const d = await r.json();
         if (d.running) {
-            const models = d.models || {};
-            const loaded = Object.entries(models).filter(([,v]) => v).map(([k]) => k).join(', ');
-            el.innerHTML = `<span class="qwen3-status-ok">\u2713 Server running</span> \u2014 ${d.model_size || '?'} on ${d.device || '?'} \u2014 Models: ${loaded || 'none'}`;
+            const ms = d.model_status || {};
+            const parts = Object.entries(ms).map(([k, state]) => {
+                const icon = state === 'gpu' ? '\u2705' : state === 'cpu' ? '\uD83D\uDCA4' : '\u274C';
+                return `${icon} ${k}`;
+            });
+            const memInfo = d.memory_gb > 0 ? ` \u2014 ${d.memory_gb} GB RAM` : '';
+            el.innerHTML = `<span class="qwen3-status-ok">\u2713 Server running</span> \u2014 ${d.model_size || '?'} on ${d.device || '?'}${memInfo}<br><span class="text-muted" style="font-size:0.85em">${parts.join(' &nbsp;\u2022&nbsp; ')}</span>`;
         } else {
             el.innerHTML = `<span class="qwen3-status-err">\u2717 Server not running</span> \u2014 It should auto-start when you select Qwen3-TTS as your TTS provider.`;
         }
@@ -348,22 +379,32 @@ async function _checkStatus(container) {
 
 // ── Preset Dropdown Logic ──
 
-function _setupPresetDropdown(container, selectId, textareaId) {
+function _setupPresetDropdown(container, selectId, textareaId, opts = {}) {
     const select = container.querySelector(`#${selectId}`);
     const textarea = container.querySelector(`#${textareaId}`);
     if (!select || !textarea) return;
+
+    // alwaysShowTextarea: keep textarea visible so user can see full text (good for long presets)
+    const alwaysShow = opts.alwaysShowTextarea || false;
 
     select.addEventListener('change', () => {
         const val = select.value;
         if (val === '__custom__') {
             textarea.classList.remove('qwen3-hidden');
+            textarea.readOnly = false;
             textarea.value = '';
             textarea.focus();
         } else if (val === '') {
             textarea.classList.remove('qwen3-hidden');
+            textarea.readOnly = false;
             textarea.value = '';
         } else {
-            textarea.classList.add('qwen3-hidden');
+            if (alwaysShow) {
+                textarea.classList.remove('qwen3-hidden');
+                textarea.readOnly = true;
+            } else {
+                textarea.classList.add('qwen3-hidden');
+            }
             textarea.value = val;
         }
     });
@@ -398,6 +439,7 @@ function _attachListeners(container) {
 
     // Preset dropdowns
     _setupPresetDropdown(container, 'qwen3-design-preset', 'qwen3-design-instruct');
+    _setupPresetDropdown(container, 'qwen3-clone-ref-preset', 'qwen3-clone-ref-text', { alwaysShowTextarea: true });
     _setupPresetDropdown(container, 'qwen3-custom-style-preset', 'qwen3-custom-instruct');
 
     // Open folder button
@@ -428,7 +470,7 @@ function _attachListeners(container) {
 
         const refAudioB64 = await _fileToBase64(fileInput.files[0]);
         const text = container.querySelector('#qwen3-clone-target')?.value;
-        const ref_text = container.querySelector('#qwen3-clone-ref-text')?.value;
+        const ref_text = _getPresetValue(container, 'qwen3-clone-ref-preset', 'qwen3-clone-ref-text');
         const x_vector_only = container.querySelector('#qwen3-clone-xvector')?.checked;
         const language = container.querySelector('#qwen3-clone-lang')?.value;
 
@@ -444,7 +486,7 @@ function _attachListeners(container) {
     _attachSaveBtn(container, 'clone', () => ({
         type: 'voice_clone',
         ref_audio: container._cloneRefFilename || '',
-        ref_text: container.querySelector('#qwen3-clone-ref-text')?.value || '',
+        ref_text: _getPresetValue(container, 'qwen3-clone-ref-preset', 'qwen3-clone-ref-text'),
         x_vector_only: container.querySelector('#qwen3-clone-xvector')?.checked || false,
         language: container.querySelector('#qwen3-clone-lang')?.value || 'Auto',
     }));
@@ -514,7 +556,7 @@ function _attachSaveBtn(container, tab, getProfileData) {
         if (!name) return;
 
         btn.disabled = true;
-        btn.textContent = 'Saving...';
+        btn.textContent = tab === 'clone' ? 'Saving & caching voice...' : 'Saving...';
 
         const data = getProfileData();
         data.name = name;

@@ -53,6 +53,11 @@ HOST = os.environ.get('QWEN3_TTS_HOST', '0.0.0.0')
 PORT = int(os.environ.get('QWEN3_TTS_PORT', '5013'))
 DEVICE = os.environ.get('QWEN3_TTS_DEVICE', 'cuda:0')
 MODEL_SIZE = os.environ.get('QWEN3_TTS_MODEL_SIZE', '1.7B')
+# Comma-separated list of models to load: "custom_voice,voice_design,base" or "all"
+LOAD_MODELS = os.environ.get('QWEN3_TTS_LOAD_MODELS', 'all').lower().strip()
+
+# Auto-offload idle models after this many seconds (0 = never offload)
+OFFLOAD_TIMEOUT = int(os.environ.get('QWEN3_TTS_OFFLOAD_TIMEOUT', '60'))
 
 # --- Constants ---
 AUDIO_SAMPLE_RATE = 24000  # Qwen3-TTS output rate (will be set from model)
@@ -66,10 +71,23 @@ request_count_lock = threading.Lock()
 generation_lock = threading.Lock()
 
 # --- Model storage ---
+# Models on GPU (active)
 models = {
     'custom_voice': None,
     'voice_design': None,
     'base': None,
+}
+# Models offloaded to CPU (idle)
+models_cpu = {
+    'custom_voice': None,
+    'voice_design': None,
+    'base': None,
+}
+# Track last usage time per model
+model_last_used = {
+    'custom_voice': 0.0,
+    'voice_design': 0.0,
+    'base': 0.0,
 }
 
 
@@ -84,8 +102,27 @@ def get_temp_dir():
 TEMP_DIR = get_temp_dir()
 
 
+def _should_load(model_key):
+    """Check if a model should be loaded based on LOAD_MODELS config."""
+    if LOAD_MODELS == 'all':
+        return True
+    requested = [m.strip() for m in LOAD_MODELS.split(',')]
+    return model_key in requested
+
+
+def _get_attn_impl():
+    """Return 'flash_attention_2' if flash-attn is installed, else None (uses default)."""
+    try:
+        import flash_attn  # noqa: F401
+        logger.info("flash-attn detected — using flash_attention_2")
+        return "flash_attention_2"
+    except ImportError:
+        logger.warning("flash-attn not installed — using default attention (slower)")
+        return None
+
+
 def load_models():
-    """Load Qwen3-TTS models. Called once at startup."""
+    """Load Qwen3-TTS models. Only loads models specified by LOAD_MODELS config."""
     global AUDIO_SAMPLE_RATE
 
     try:
@@ -97,44 +134,154 @@ def load_models():
         sys.exit(1)
 
     dtype = torch.bfloat16
+    attn_impl = _get_attn_impl()
+    attn_kwargs = {"attn_implementation": attn_impl} if attn_impl else {}
+    logger.info(f"Model loading config: LOAD_MODELS={LOAD_MODELS}")
 
     # CustomVoice model (preset speakers + instruction control)
-    logger.info(f"Loading CustomVoice model ({MODEL_SIZE})...")
-    try:
-        models['custom_voice'] = Qwen3TTSModel.from_pretrained(
-            f"Qwen/Qwen3-TTS-12Hz-{MODEL_SIZE}-CustomVoice",
-            device_map=DEVICE, torch_dtype=dtype
-        )
-        logger.info("CustomVoice model loaded")
-    except Exception as e:
-        logger.error(f"Failed to load CustomVoice model: {e}")
+    if _should_load('custom_voice'):
+        logger.info(f"Loading CustomVoice model ({MODEL_SIZE})...")
+        try:
+            models['custom_voice'] = Qwen3TTSModel.from_pretrained(
+                f"Qwen/Qwen3-TTS-12Hz-{MODEL_SIZE}-CustomVoice",
+                device_map=DEVICE, torch_dtype=dtype, **attn_kwargs,
+            )
+            logger.info("CustomVoice model loaded")
+        except Exception as e:
+            logger.error(f"Failed to load CustomVoice model: {e}")
+    else:
+        logger.info("Skipping CustomVoice model (not in LOAD_MODELS)")
 
     # VoiceDesign model (1.7B only — natural language voice descriptions)
-    if MODEL_SIZE == '1.7B':
-        logger.info("Loading VoiceDesign model (1.7B only)...")
-        try:
-            models['voice_design'] = Qwen3TTSModel.from_pretrained(
-                "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
-                device_map=DEVICE, torch_dtype=dtype
-            )
-            logger.info("VoiceDesign model loaded")
-        except Exception as e:
-            logger.error(f"Failed to load VoiceDesign model: {e}")
+    if _should_load('voice_design'):
+        if MODEL_SIZE == '1.7B':
+            logger.info("Loading VoiceDesign model (1.7B only)...")
+            try:
+                models['voice_design'] = Qwen3TTSModel.from_pretrained(
+                    "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+                    device_map=DEVICE, torch_dtype=dtype, **attn_kwargs,
+                )
+                logger.info("VoiceDesign model loaded")
+            except Exception as e:
+                logger.error(f"Failed to load VoiceDesign model: {e}")
+        else:
+            logger.info("Skipping VoiceDesign model (requires 1.7B)")
     else:
-        logger.info("Skipping VoiceDesign model (requires 1.7B)")
+        logger.info("Skipping VoiceDesign model (not in LOAD_MODELS)")
 
     # Base model (voice cloning)
-    logger.info(f"Loading Base model ({MODEL_SIZE}) for voice cloning...")
-    try:
-        models['base'] = Qwen3TTSModel.from_pretrained(
-            f"Qwen/Qwen3-TTS-12Hz-{MODEL_SIZE}-Base",
-            device_map=DEVICE, torch_dtype=dtype
-        )
-        logger.info("Base (clone) model loaded")
-    except Exception as e:
-        logger.error(f"Failed to load Base model: {e}")
+    if _should_load('base'):
+        logger.info(f"Loading Base model ({MODEL_SIZE}) for voice cloning...")
+        try:
+            models['base'] = Qwen3TTSModel.from_pretrained(
+                f"Qwen/Qwen3-TTS-12Hz-{MODEL_SIZE}-Base",
+                device_map=DEVICE, torch_dtype=dtype, **attn_kwargs,
+            )
+            logger.info("Base (clone) model loaded")
+        except Exception as e:
+            logger.error(f"Failed to load Base model: {e}")
+    else:
+        logger.info("Skipping Base model (not in LOAD_MODELS)")
 
-    logger.info("All available models loaded successfully")
+    loaded = [k for k, v in models.items() if v is not None]
+    logger.info(f"Models loaded: {', '.join(loaded) or 'none'}")
+
+    # Mark all loaded models as recently used
+    now = time.time()
+    for k in loaded:
+        model_last_used[k] = now
+
+    # Start the offload timer
+    if OFFLOAD_TIMEOUT > 0:
+        _start_offload_timer()
+
+
+def _offload_model(key):
+    """Move a model from GPU to CPU to free VRAM."""
+    import torch
+    model = models.get(key)
+    if model is None:
+        return
+    try:
+        model.model.to('cpu')
+        torch.cuda.empty_cache()
+        models_cpu[key] = model
+        models[key] = None
+        logger.info(f"Offloaded {key} to CPU (idle > {OFFLOAD_TIMEOUT}s)")
+    except Exception as e:
+        logger.error(f"Failed to offload {key}: {e}")
+
+
+def _reload_model(key):
+    """Move a model from CPU back to GPU."""
+    import torch
+    model = models_cpu.get(key)
+    if model is None:
+        return False
+    try:
+        logger.info(f"Reloading {key} to {DEVICE}...")
+        model.model.to(DEVICE)
+        models[key] = model
+        models_cpu[key] = None
+        model_last_used[key] = time.time()
+        logger.info(f"Reloaded {key} to GPU")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to reload {key}: {e}")
+        return False
+
+
+def _get_model(key):
+    """Get a model, reloading from CPU if it was offloaded."""
+    if models.get(key) is not None:
+        model_last_used[key] = time.time()
+        return models[key]
+    # Try to reload from CPU
+    if models_cpu.get(key) is not None:
+        with generation_lock:
+            # Double-check inside lock
+            if models.get(key) is not None:
+                model_last_used[key] = time.time()
+                return models[key]
+            if _reload_model(key):
+                return models[key]
+    return None
+
+
+def _offload_check():
+    """Check for idle models and offload them. Runs periodically."""
+    now = time.time()
+    for key in list(models.keys()):
+        if models[key] is None:
+            continue
+        idle_time = now - model_last_used.get(key, 0)
+        if idle_time > OFFLOAD_TIMEOUT:
+            with generation_lock:
+                # Re-check after acquiring lock
+                if models[key] is not None and (time.time() - model_last_used.get(key, 0)) > OFFLOAD_TIMEOUT:
+                    _offload_model(key)
+
+
+_offload_timer = None
+
+def _start_offload_timer():
+    """Start a repeating timer that checks for idle models."""
+    global _offload_timer
+
+    def _tick():
+        global _offload_timer
+        try:
+            _offload_check()
+        except Exception as e:
+            logger.error(f"Offload check error: {e}")
+        _offload_timer = threading.Timer(15, _tick)
+        _offload_timer.daemon = True
+        _offload_timer.start()
+
+    _offload_timer = threading.Timer(15, _tick)
+    _offload_timer.daemon = True
+    _offload_timer.start()
+    logger.info(f"Offload timer started (timeout={OFFLOAD_TIMEOUT}s, check every 15s)")
 
 
 def _json_response(handler, data, status=200):
@@ -182,6 +329,14 @@ def _read_json_body(handler):
         return None, "Invalid JSON body"
 
 
+def _ensure_mono_float32(wav):
+    """Convert audio to mono float32. Fixes qwen_tts tuple assignment bug with stereo input."""
+    wav = wav.astype(np.float32)
+    if wav.ndim > 1:
+        wav = np.mean(wav, axis=-1).astype(np.float32)
+    return wav
+
+
 def _decode_ref_audio(data):
     """Decode reference audio from base64 or file path. Returns (wav_np, sr) tuple."""
     ref_audio = data.get('ref_audio')
@@ -193,7 +348,8 @@ def _decode_ref_audio(data):
         try:
             audio_bytes = base64.b64decode(ref_audio)
             wav, sr = sf.read(io.BytesIO(audio_bytes))
-            return (wav.astype(np.float32), sr), None
+            wav = _ensure_mono_float32(wav)
+            return (wav, sr), None
         except Exception as e:
             return None, f"Failed to decode base64 audio: {e}"
 
@@ -204,7 +360,8 @@ def _decode_ref_audio(data):
         if os.path.exists(audio_path):
             try:
                 wav, sr = sf.read(audio_path)
-                return (wav.astype(np.float32), sr), None
+                wav = _ensure_mono_float32(wav)
+                return (wav, sr), None
             except Exception as e:
                 return None, f"Failed to read audio file: {e}"
         return None, f"Audio file not found: {ref_audio}"
@@ -229,6 +386,7 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
             '/generate/custom': self._handle_custom_voice,
             '/generate/design': self._handle_voice_design,
             '/generate/clone': self._handle_voice_clone,
+            '/create-prompt': self._handle_create_prompt,
         }
         handler = routes.get(self.path)
         if handler:
@@ -243,9 +401,20 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
         except Exception:
             mem_gb = -1
 
+        model_status = {}
+        for k in models:
+            if models[k] is not None:
+                model_status[k] = 'gpu'
+            elif models_cpu[k] is not None:
+                model_status[k] = 'cpu'
+            else:
+                model_status[k] = 'not_loaded'
+
         _json_response(self, {
             'status': 'ok',
             'models': {k: v is not None for k, v in models.items()},
+            'model_status': model_status,
+            'offload_timeout': OFFLOAD_TIMEOUT,
             'model_size': MODEL_SIZE,
             'device': DEVICE,
             'requests': request_count,
@@ -255,7 +424,7 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
     def _handle_custom_voice(self):
         """Generate with preset speaker + optional style instruction."""
         global request_count
-        model = models.get('custom_voice')
+        model = _get_model('custom_voice')
         if not model:
             _json_response(self, {'error': 'CustomVoice model not loaded'}, 503)
             return
@@ -288,6 +457,7 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                     non_streaming_mode=True,
                     max_new_tokens=MAX_NEW_TOKENS,
                 )
+                model_last_used['custom_voice'] = time.time()
             elapsed = time.time() - t0
             logger.info(f"CustomVoice generated in {elapsed:.2f}s (speaker={speaker})")
             _audio_response(self, wavs[0], sr)
@@ -298,7 +468,7 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
     def _handle_voice_design(self):
         """Generate with natural language voice description."""
         global request_count
-        model = models.get('voice_design')
+        model = _get_model('voice_design')
         if not model:
             _json_response(self, {'error': 'VoiceDesign model not loaded (requires 1.7B)'}, 503)
             return
@@ -333,6 +503,7 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                     non_streaming_mode=True,
                     max_new_tokens=MAX_NEW_TOKENS,
                 )
+                model_last_used['voice_design'] = time.time()
             elapsed = time.time() - t0
             logger.info(f"VoiceDesign generated in {elapsed:.2f}s")
             _audio_response(self, wavs[0], sr)
@@ -340,10 +511,62 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
             logger.error(f"VoiceDesign generation failed: {e}")
             _json_response(self, {'error': str(e)}, 500)
 
+    def _handle_create_prompt(self):
+        """Pre-compute voice clone prompt and save as .pt file for reuse."""
+        model = _get_model('base')
+        if not model:
+            _json_response(self, {'error': 'Base (clone) model not loaded'}, 503)
+            return
+
+        data, err = _read_json_body(self)
+        if err:
+            _json_response(self, {'error': err}, 400)
+            return
+
+        ref_audio_tuple, audio_err = _decode_ref_audio(data)
+        if audio_err:
+            _json_response(self, {'error': audio_err}, 400)
+            return
+        if ref_audio_tuple is None:
+            _json_response(self, {'error': 'No reference audio provided'}, 400)
+            return
+
+        ref_text = (data.get('ref_text') or '').strip() or None
+        x_vector_only = data.get('x_vector_only', False)
+        save_path = data.get('save_path', '')
+
+        if not save_path:
+            _json_response(self, {'error': 'save_path is required'}, 400)
+            return
+
+        t0 = time.time()
+        try:
+            import torch
+            from dataclasses import asdict
+
+            with generation_lock:
+                items = model.create_voice_clone_prompt(
+                    ref_audio=ref_audio_tuple,
+                    ref_text=ref_text,
+                    x_vector_only_mode=bool(x_vector_only),
+                )
+
+            payload = {"items": [asdict(it) for it in items]}
+
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            torch.save(payload, save_path)
+
+            elapsed = time.time() - t0
+            logger.info(f"Voice clone prompt created in {elapsed:.2f}s -> {save_path}")
+            _json_response(self, {'status': 'ok', 'path': save_path})
+        except Exception as e:
+            logger.error(f"Create voice clone prompt failed: {e}")
+            _json_response(self, {'error': str(e)}, 500)
+
     def _handle_voice_clone(self):
-        """Generate by cloning from reference audio."""
+        """Generate by cloning — uses cached prompt (.pt) if available, otherwise ref audio."""
         global request_count
-        model = models.get('base')
+        model = _get_model('base')
         if not model:
             _json_response(self, {'error': 'Base (clone) model not loaded'}, 503)
             return
@@ -358,23 +581,63 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
             _json_response(self, {'error': 'No text provided'}, 400)
             return
 
-        ref_audio_tuple, audio_err = _decode_ref_audio(data)
-        if audio_err:
-            _json_response(self, {'error': audio_err}, 400)
-            return
-        if ref_audio_tuple is None:
-            _json_response(self, {'error': 'No reference audio provided'}, 400)
-            return
-
-        ref_text = (data.get('ref_text') or '').strip() or None
-        x_vector_only = data.get('x_vector_only', False)
         language = data.get('language', 'Auto')
+        prompt_path = data.get('prompt_path', '')
 
         with request_count_lock:
             request_count += 1
 
         t0 = time.time()
         try:
+            # --- Cached prompt path (fast, consistent) ---
+            if prompt_path and os.path.exists(prompt_path):
+                import torch
+                from qwen_tts.inference.qwen3_tts_model import VoiceClonePromptItem
+
+                payload = torch.load(prompt_path, map_location="cpu", weights_only=True)
+                items_raw = payload.get("items", [])
+                items = []
+                for d in items_raw:
+                    ref_code = d.get("ref_code", None)
+                    if ref_code is not None and not torch.is_tensor(ref_code):
+                        ref_code = torch.tensor(ref_code)
+                    ref_spk = d.get("ref_spk_embedding", None)
+                    if ref_spk is not None and not torch.is_tensor(ref_spk):
+                        ref_spk = torch.tensor(ref_spk)
+                    items.append(VoiceClonePromptItem(
+                        ref_code=ref_code,
+                        ref_spk_embedding=ref_spk,
+                        x_vector_only_mode=bool(d.get("x_vector_only_mode", False)),
+                        icl_mode=bool(d.get("icl_mode", True)),
+                        ref_text=d.get("ref_text", None),
+                    ))
+
+                with generation_lock:
+                    wavs, sr = model.generate_voice_clone(
+                        text=text,
+                        language=language,
+                        voice_clone_prompt=items,
+                        non_streaming_mode=True,
+                        max_new_tokens=MAX_NEW_TOKENS,
+                    )
+                    model_last_used['base'] = time.time()
+                elapsed = time.time() - t0
+                logger.info(f"VoiceClone (cached prompt) generated in {elapsed:.2f}s")
+                _audio_response(self, wavs[0], sr)
+                return
+
+            # --- Fallback: raw ref audio (preview mode) ---
+            ref_audio_tuple, audio_err = _decode_ref_audio(data)
+            if audio_err:
+                _json_response(self, {'error': audio_err}, 400)
+                return
+            if ref_audio_tuple is None:
+                _json_response(self, {'error': 'No reference audio or cached prompt provided'}, 400)
+                return
+
+            ref_text = (data.get('ref_text') or '').strip() or None
+            x_vector_only = data.get('x_vector_only', False)
+
             with generation_lock:
                 wavs, sr = model.generate_voice_clone(
                     text=text,
@@ -382,10 +645,12 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                     ref_audio=ref_audio_tuple,
                     ref_text=ref_text,
                     x_vector_only_mode=x_vector_only,
+                    non_streaming_mode=True,
                     max_new_tokens=MAX_NEW_TOKENS,
                 )
+                model_last_used['base'] = time.time()
             elapsed = time.time() - t0
-            logger.info(f"VoiceClone generated in {elapsed:.2f}s")
+            logger.info(f"VoiceClone (raw ref) generated in {elapsed:.2f}s")
             _audio_response(self, wavs[0], sr)
         except Exception as e:
             logger.error(f"VoiceClone generation failed: {e}")

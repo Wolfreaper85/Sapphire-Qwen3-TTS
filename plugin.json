@@ -1,6 +1,6 @@
 {
   "name": "qwen3-tts",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Qwen3-TTS \u2014 local AI text-to-speech with voice cloning, voice design, and preset voices",
   "author": "sapphire",
   "icon": "\ud83c\udfb5",
@@ -29,14 +29,15 @@
       {"method": "POST", "path": "generate/preview",      "handler": "routes/api.py:generate_preview"},
       {"method": "GET",  "path": "status",                "handler": "routes/api.py:get_status"},
       {"method": "POST", "path": "upload-ref",            "handler": "routes/api.py:upload_reference_audio"},
-      {"method": "POST", "path": "open-folder",           "handler": "routes/api.py:open_folder"}
+      {"method": "POST", "path": "open-folder",           "handler": "routes/api.py:open_folder"},
+      {"method": "POST", "path": "create-prompt",         "handler": "routes/api.py:create_prompt"}
     ],
     "settings": [
       {
         "key": "model_size",
         "type": "select",
         "label": "Model Size",
-        "default": "1.7B",
+        "default": "0.6B",
         "options": [
           {"value": "0.6B", "label": "0.6B (Lightweight, less VRAM)"},
           {"value": "1.7B", "label": "1.7B (Full quality)"}
@@ -61,6 +62,25 @@
           {"value": "cpu", "label": "CPU (slow)"}
         ],
         "help": "GPU device for inference"
+      },
+      {
+        "key": "load_models",
+        "type": "select",
+        "label": "Models to Load",
+        "default": "all",
+        "options": [
+          {"value": "base", "label": "Clone Only (~5 GB VRAM)"},
+          {"value": "base,custom_voice", "label": "Clone + Presets (~10 GB VRAM)"},
+          {"value": "all", "label": "All Models (~15 GB at startup, idle auto-offload)"}
+        ],
+        "help": "Idle models auto-offload to CPU after 60s and reload on demand. 'All' is recommended — VRAM is freed automatically."
+      },
+      {
+        "key": "offload_timeout",
+        "type": "string",
+        "label": "Offload Timeout (seconds)",
+        "default": "60",
+        "help": "Seconds of inactivity before an idle model is moved from GPU to CPU. Set 0 to disable offloading."
       }
     ]
   }

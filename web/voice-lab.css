@@ -221,6 +221,11 @@
 .qwen3-preset-group textarea.qwen3-hidden {
     display: none;
 }
+.qwen3-preset-group textarea[readonly] {
+    opacity: 0.85;
+    border-style: dashed;
+    cursor: default;
+}
 
 .qwen3-row {
     display: flex;

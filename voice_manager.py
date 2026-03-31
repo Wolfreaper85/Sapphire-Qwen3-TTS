@@ -57,6 +57,7 @@ class VoiceProfile:
         self.ref_audio: str = data.get("ref_audio", "")     # Filename for clone ref audio
         self.ref_text: str = data.get("ref_text", "")       # Transcript for clone ref
         self.x_vector_only: bool = data.get("x_vector_only", False)
+        self.prompt_path: str = data.get("prompt_path", "")  # Cached .pt voice clone prompt
         self.preview_audio: str = data.get("preview_audio", "")
         self.created: str = data.get("created", "")
         self.modified: str = data.get("modified", "")
@@ -73,6 +74,7 @@ class VoiceProfile:
             "ref_audio": self.ref_audio,
             "ref_text": self.ref_text,
             "x_vector_only": self.x_vector_only,
+            "prompt_path": self.prompt_path,
             "preview_audio": self.preview_audio,
             "created": self.created,
             "modified": self.modified,
@@ -140,7 +142,7 @@ class VoiceManager:
         if not path.exists():
             return False
 
-        # Load profile to find associated audio files
+        # Load profile to find associated audio and prompt files
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             for audio_key in ("ref_audio", "preview_audio"):
@@ -149,6 +151,12 @@ class VoiceManager:
                     audio_path = self._audio_dir / audio_file
                     if audio_path.exists():
                         audio_path.unlink()
+            # Delete cached voice clone prompt
+            prompt_file = data.get("prompt_path", "")
+            if prompt_file:
+                prompt_path = self._dir / prompt_file
+                if prompt_path.exists():
+                    prompt_path.unlink()
         except Exception:
             pass
 

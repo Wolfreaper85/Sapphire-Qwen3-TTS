@@ -14,6 +14,7 @@ Voice ID format:
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -30,6 +31,7 @@ DEFAULT_SPEAKER = 'ryan'
 
 # Module-level server manager — persists across provider re-creation
 _server_manager: Optional[ProcessManager] = None
+_last_relaunch_attempt: float = 0.0  # Cooldown to prevent restart loops
 
 
 def _get_settings():
@@ -94,6 +96,8 @@ def _start_server():
     env['QWEN3_TTS_PORT'] = str(port)
     env['QWEN3_TTS_DEVICE'] = settings.get('device', 'cuda:0')
     env['QWEN3_TTS_MODEL_SIZE'] = settings.get('model_size', '1.7B')
+    env['QWEN3_TTS_LOAD_MODELS'] = settings.get('load_models', 'all')
+    env['QWEN3_TTS_OFFLOAD_TIMEOUT'] = str(settings.get('offload_timeout', '60'))
 
     # Ensure HF_HOME is set (Sapphire's Start Sapphire.bat sets this)
     if not env.get('HF_HOME'):
@@ -179,23 +183,40 @@ class Qwen3TTSProvider(BaseTTSProvider):
 
     def generate(self, text: str, voice: str, speed: float, **kwargs) -> Optional[bytes]:
         """Generate audio. Dispatches to the right model based on voice ID format."""
+        logger.info(f"[Qwen3-TTS] generate() called with voice='{voice}', speed={speed}")
         clamped_speed = max(self.SPEED_MIN, min(self.SPEED_MAX, speed))
         if clamped_speed != speed:
             logger.warning(f"Qwen3-TTS: clamped speed {speed} -> {clamped_speed}")
+
+        # Auto-relaunch server if it crashed (max once per 120s to avoid loops)
+        global _last_relaunch_attempt
+        if not _server_is_healthy():
+            now = time.time()
+            if now - _last_relaunch_attempt > 120:
+                _last_relaunch_attempt = now
+                logger.warning("[Qwen3-TTS] Server not healthy, attempting relaunch...")
+                _start_server()
+            else:
+                logger.warning("[Qwen3-TTS] Server not healthy, skipping relaunch (cooldown)")
+                return None
 
         server = _server_url()
 
         # Parse voice ID to determine generation mode
         if voice and voice.startswith('qwen3:preset:'):
             speaker = voice.split(':', 2)[2]
+            logger.info(f"[Qwen3-TTS] -> preset speaker: {speaker}")
             return self._generate_custom(server, text, speaker, kwargs.get('instruct'), clamped_speed)
 
         elif voice and voice.startswith('qwen3:'):
             profile_id = voice.split(':', 1)[1]
+            logger.info(f"[Qwen3-TTS] -> profile: {profile_id}")
             return self._generate_from_profile(server, text, profile_id, clamped_speed)
 
         else:
+            # Non-qwen3 voice ID — use as speaker name or fall back to default
             speaker = voice if voice else DEFAULT_SPEAKER
+            logger.warning(f"[Qwen3-TTS] -> non-qwen3 voice '{voice}', using as speaker: {speaker}")
             return self._generate_custom(server, text, speaker, kwargs.get('instruct'), clamped_speed)
 
     def _generate_custom(self, server: str, text: str, speaker: str,
@@ -241,16 +262,70 @@ class Qwen3TTSProvider(BaseTTSProvider):
                 'language': profile.language,
             })
         elif profile.type == 'voice_clone':
-            return self._post(server, '/generate/clone', {
+            payload = {
                 'text': text,
-                'ref_audio': profile.ref_audio,
-                'ref_text': profile.ref_text or None,
-                'x_vector_only': profile.x_vector_only,
                 'language': profile.language,
-            })
+            }
+            # Use cached voice prompt if available (faster + more consistent)
+            if profile.prompt_path:
+                plugin_dir = Path(__file__).parent
+                prompt_full_path = plugin_dir / "voices" / profile.prompt_path
+                if prompt_full_path.exists():
+                    payload['prompt_path'] = str(prompt_full_path)
+                    return self._post(server, '/generate/clone', payload)
+
+            # Fallback to raw ref audio
+            payload['ref_audio'] = profile.ref_audio
+            payload['ref_text'] = profile.ref_text or None
+            payload['x_vector_only'] = profile.x_vector_only
+            audio = self._post(server, '/generate/clone', payload)
+
+            # Auto-cache: create .pt prompt in background on first successful use
+            if audio and profile.ref_audio:
+                self._auto_cache_prompt(server, profile, voice_manager)
+
+            return audio
         else:
             logger.warning(f"Qwen3-TTS: unknown profile type '{profile.type}'")
             return self._generate_custom(server, text, DEFAULT_SPEAKER, None, speed)
+
+    def _auto_cache_prompt(self, server: str, profile, voice_manager):
+        """Create a .pt voice clone prompt cache in the background.
+
+        Called automatically on first successful generation for a clone voice
+        that has no cached prompt. Updates the voice profile with the new
+        prompt_path so subsequent calls skip ref-audio re-encoding.
+        """
+        def _do_cache():
+            try:
+                plugin_dir = Path(__file__).parent
+                pt_filename = f"{profile.id}.pt"
+                save_path = plugin_dir / "voices" / pt_filename
+                audio_path = plugin_dir / "voices" / "audio" / profile.ref_audio
+
+                if not audio_path.exists():
+                    logger.warning(f"[Qwen3-TTS] Auto-cache skipped: ref audio not found: {audio_path}")
+                    return
+
+                r = requests.post(f"{server}/create-prompt", json={
+                    "ref_audio": profile.ref_audio,
+                    "ref_text": profile.ref_text or None,
+                    "x_vector_only": profile.x_vector_only,
+                    "save_path": str(save_path),
+                }, timeout=60)
+
+                if r.status_code == 200:
+                    # Update profile with the cached prompt path
+                    profile.prompt_path = pt_filename
+                    voice_manager.save_voice(profile.to_dict())
+                    logger.info(f"[Qwen3-TTS] Auto-cached voice prompt for '{profile.name}' -> {pt_filename}")
+                else:
+                    logger.warning(f"[Qwen3-TTS] Auto-cache failed: HTTP {r.status_code}")
+            except Exception as e:
+                logger.warning(f"[Qwen3-TTS] Auto-cache error: {e}")
+
+        thread = threading.Thread(target=_do_cache, daemon=True, name=f"qwen3-cache-{profile.id}")
+        thread.start()
 
     def _post(self, server: str, endpoint: str, payload: dict) -> Optional[bytes]:
         """POST to the Qwen3-TTS server with retry."""
@@ -259,7 +334,7 @@ class Qwen3TTSProvider(BaseTTSProvider):
 
         for attempt in range(1 + len(delays)):
             try:
-                response = requests.post(f"{server}{endpoint}", json=payload, timeout=120)
+                response = requests.post(f"{server}{endpoint}", json=payload, timeout=300)
                 if response.status_code == 200:
                     return response.content
                 logger.error(f"Qwen3-TTS server error: {response.status_code} on {endpoint}")
