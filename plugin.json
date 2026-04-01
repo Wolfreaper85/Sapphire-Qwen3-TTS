@@ -1,6 +1,6 @@
 {
   "name": "qwen3-tts",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Qwen3-TTS \u2014 local AI text-to-speech with voice cloning, voice design, and preset voices",
   "author": "sapphire",
   "icon": "\ud83c\udfb5",
@@ -82,6 +82,19 @@
         "label": "Offload Timeout (seconds)",
         "default": "60",
         "help": "Seconds of inactivity before an idle model is moved from GPU to CPU. Set 0 to disable offloading."
+      },
+      {
+        "key": "max_new_tokens",
+        "type": "select",
+        "label": "Max Audio Tokens",
+        "default": "4096",
+        "options": [
+          {"value": "2048", "label": "2048 (~2.8 min per chunk — saves VRAM)"},
+          {"value": "4096", "label": "4096 (~5.5 min — recommended)"},
+          {"value": "8192", "label": "8192 (~11 min — long responses)"},
+          {"value": "16384", "label": "16384 (~22 min — maximum)"}
+        ],
+        "help": "Max audio tokens per generation. Higher values allow longer text without cutoff but use more VRAM during generation. Increase if TTS cuts off mid-response."
       }
     ]
   }

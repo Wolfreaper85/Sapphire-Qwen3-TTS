@@ -62,7 +62,7 @@ OFFLOAD_TIMEOUT = int(os.environ.get('QWEN3_TTS_OFFLOAD_TIMEOUT', '60'))
 # --- Constants ---
 AUDIO_SAMPLE_RATE = 24000  # Qwen3-TTS output rate (will be set from model)
 MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10MB max (for clone audio uploads)
-MAX_NEW_TOKENS = 2048
+MAX_NEW_TOKENS = int(os.environ.get('QWEN3_TTS_MAX_NEW_TOKENS', '4096'))
 
 # --- Memory management ---
 MAX_REQUESTS = 500

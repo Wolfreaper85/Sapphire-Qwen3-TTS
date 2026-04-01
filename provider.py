@@ -132,6 +132,7 @@ def _start_server():
     env['QWEN3_TTS_MODEL_SIZE'] = settings.get('model_size', '0.6B')
     env['QWEN3_TTS_LOAD_MODELS'] = settings.get('load_models', 'all')
     env['QWEN3_TTS_OFFLOAD_TIMEOUT'] = str(settings.get('offload_timeout', '60'))
+    env['QWEN3_TTS_MAX_NEW_TOKENS'] = str(settings.get('max_new_tokens', '4096'))
 
     # Ensure HF_HOME is set (Sapphire's Start Sapphire.bat sets this)
     if not env.get('HF_HOME'):
@@ -158,6 +159,7 @@ def _start_server():
         fresh_env['QWEN3_TTS_MODEL_SIZE'] = fresh_settings.get('model_size', '0.6B')
         fresh_env['QWEN3_TTS_LOAD_MODELS'] = fresh_settings.get('load_models', 'all')
         fresh_env['QWEN3_TTS_OFFLOAD_TIMEOUT'] = str(fresh_settings.get('offload_timeout', '60'))
+        fresh_env['QWEN3_TTS_MAX_NEW_TOKENS'] = str(fresh_settings.get('max_new_tokens', '4096'))
         if not fresh_env.get('HF_HOME'):
             portable_cache = Path(__file__).parent.parent.parent.parent / '.hf_cache'
             if portable_cache.is_dir():
