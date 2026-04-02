@@ -401,12 +401,51 @@ class Qwen3TTSProvider(BaseTTSProvider):
                 'temperature': _get_temperature(),
             })
         elif profile.type == 'voice_design':
+            # Route designed voices through the clone pipeline for consistency.
+            # Voice Design regenerates a fresh voice from the description each time,
+            # causing variance across messages. Instead, we use the saved preview
+            # audio as a clone reference — same voice every time.
+            seed_temp = {
+                'seed': _get_seed(profile_id),
+                'temperature': _get_temperature(),
+            }
+
+            # 1. Use cached .pt prompt if available (fastest + most consistent)
+            if profile.prompt_path:
+                voice_dir = voice_manager.get_voice_dir(profile.type, profile.model_size)
+                prompt_full_path = voice_dir / profile.prompt_path
+                if prompt_full_path.exists():
+                    return self._post(server, '/generate/clone', {
+                        'text': text,
+                        'language': profile.language,
+                        'prompt_path': str(prompt_full_path),
+                        **seed_temp,
+                    })
+
+            # 2. Use preview audio as clone reference
+            if profile.preview_audio:
+                voice_dir = voice_manager.get_voice_dir(profile.type, profile.model_size)
+                preview_path = voice_dir / "audio" / profile.preview_audio
+                if preview_path.exists():
+                    audio = self._post(server, '/generate/clone', {
+                        'text': text,
+                        'language': profile.language,
+                        'ref_audio': profile.preview_audio,
+                        **seed_temp,
+                    })
+                    # Auto-cache .pt for future calls
+                    if audio:
+                        self._auto_cache_prompt_for_design(server, profile, voice_manager)
+                    return audio
+
+            # 3. Fallback: no preview audio saved — use original design path
+            logger.warning(f"[Qwen3-TTS] Design voice '{profile.name}' has no preview audio, "
+                           f"falling back to /generate/design (may vary between messages)")
             return self._post(server, '/generate/design', {
                 'text': text,
                 'instruct': profile.instruct,
                 'language': profile.language,
-                'seed': _get_seed(profile_id),
-                'temperature': _get_temperature(),
+                **seed_temp,
             })
         elif profile.type == 'voice_clone':
             payload = {
@@ -474,6 +513,43 @@ class Qwen3TTSProvider(BaseTTSProvider):
                 logger.warning(f"[Qwen3-TTS] Auto-cache error: {e}")
 
         thread = threading.Thread(target=_do_cache, daemon=True, name=f"qwen3-cache-{profile.id}")
+        thread.start()
+
+    def _auto_cache_prompt_for_design(self, server: str, profile, voice_manager):
+        """Create a .pt clone prompt cache from a designed voice's preview audio.
+
+        Same as _auto_cache_prompt but uses preview_audio instead of ref_audio.
+        This converts designed voices into cached clone embeddings for consistent
+        persona TTS — the voice sounds the same every message.
+        """
+        def _do_cache():
+            try:
+                voice_dir = voice_manager.get_voice_dir(profile.type, profile.model_size)
+                pt_filename = f"{profile.id}.pt"
+                save_path = voice_dir / pt_filename
+                audio_path = voice_dir / "audio" / profile.preview_audio
+
+                if not audio_path.exists():
+                    logger.warning(f"[Qwen3-TTS] Design auto-cache skipped: preview audio not found: {audio_path}")
+                    return
+
+                r = requests.post(f"{server}/create-prompt", json={
+                    "ref_audio": profile.preview_audio,
+                    "ref_text": None,
+                    "x_vector_only": False,
+                    "save_path": str(save_path),
+                }, timeout=60)
+
+                if r.status_code == 200:
+                    profile.prompt_path = pt_filename
+                    voice_manager.save_voice(profile.to_dict())
+                    logger.info(f"[Qwen3-TTS] Auto-cached design voice '{profile.name}' as clone prompt -> {pt_filename}")
+                else:
+                    logger.warning(f"[Qwen3-TTS] Design auto-cache failed: HTTP {r.status_code}")
+            except Exception as e:
+                logger.warning(f"[Qwen3-TTS] Design auto-cache error: {e}")
+
+        thread = threading.Thread(target=_do_cache, daemon=True, name=f"qwen3-design-cache-{profile.id}")
         thread.start()
 
     def _post(self, server: str, endpoint: str, payload: dict) -> Optional[bytes]:
