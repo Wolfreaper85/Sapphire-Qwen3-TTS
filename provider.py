@@ -422,7 +422,7 @@ class Qwen3TTSProvider(BaseTTSProvider):
                         **seed_temp,
                     })
 
-            # 2. Use preview audio as clone reference
+            # 2. Use preview audio as clone reference (x_vector_only since we have no transcript)
             if profile.preview_audio:
                 voice_dir = voice_manager.get_voice_dir(profile.type, profile.model_size)
                 preview_path = voice_dir / "audio" / profile.preview_audio
@@ -431,6 +431,7 @@ class Qwen3TTSProvider(BaseTTSProvider):
                         'text': text,
                         'language': profile.language,
                         'ref_audio': profile.preview_audio,
+                        'x_vector_only': True,
                         **seed_temp,
                     })
                     # Auto-cache .pt for future calls
@@ -536,7 +537,7 @@ class Qwen3TTSProvider(BaseTTSProvider):
                 r = requests.post(f"{server}/create-prompt", json={
                     "ref_audio": profile.preview_audio,
                     "ref_text": None,
-                    "x_vector_only": False,
+                    "x_vector_only": True,
                     "save_path": str(save_path),
                 }, timeout=60)
 
