@@ -126,6 +126,8 @@ async def generate_voice_design(**kwargs):
             "text": text,
             "instruct": instruct,
             "language": language,
+            "seed": body.get("seed", -1),
+            "temperature": body.get("temperature", 0.7),
         }, timeout=120)
 
         if r.status_code == 200:
@@ -166,6 +168,8 @@ async def generate_voice_clone(**kwargs):
             "ref_text": ref_text or None,
             "x_vector_only": x_vector_only,
             "language": language,
+            "seed": body.get("seed", -1),
+            "temperature": body.get("temperature", 0.7),
         }, timeout=120)
 
         if r.status_code == 200:
@@ -202,6 +206,8 @@ async def generate_custom_voice(**kwargs):
             "speaker": speaker.lower().replace(' ', '_'),
             "instruct": instruct or None,
             "language": language,
+            "seed": body.get("seed", -1),
+            "temperature": body.get("temperature", 0.7),
         }, timeout=120)
 
         if r.status_code == 200:

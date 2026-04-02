@@ -23,6 +23,8 @@ import tempfile
 import base64
 import io
 
+import random
+
 import numpy as np
 import soundfile as sf
 
@@ -504,6 +506,32 @@ def _decode_ref_audio(data):
     return None, "Invalid ref_audio format"
 
 
+def _apply_seed(seed):
+    """Set global random seed + enforce deterministic CUDA ops for reproducible generation.
+
+    Pass seed=-1 (or None) to use a random seed (default behaviour).
+    Any non-negative integer locks the output so the same text + seed
+    always produces the same audio.
+    """
+    try:
+        seed = int(seed)
+    except (TypeError, ValueError):
+        seed = -1
+
+    if seed < 0:
+        return
+
+    import torch
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    logger.debug(f"Generation seed set to {seed} (deterministic CUDA: enabled)")
+
+
 class Qwen3TTSHandler(BaseHTTPRequestHandler):
     """HTTP handler for Qwen3-TTS generation requests."""
 
@@ -601,12 +629,14 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
         speaker = data.get('speaker', 'ryan').lower().replace(' ', '_')
         instruct = (data.get('instruct') or '').strip() or None
         language = data.get('language', 'Auto')
+        temperature = float(data.get('temperature', 0.7))
 
         with request_count_lock:
             request_count += 1
 
         t0 = time.time()
         try:
+            _apply_seed(data.get('seed', -1))
             with generation_lock:
                 result = model.generate_custom_voice(
                     text=text,
@@ -615,6 +645,8 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                     instruct=instruct,
                     non_streaming_mode=True,
                     max_new_tokens=MAX_NEW_TOKENS,
+                    temperature=temperature,
+                    do_sample=temperature > 0,
                 )
                 model_last_used['custom_voice'] = time.time()
 
@@ -650,12 +682,14 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
             return
 
         language = data.get('language', 'Auto')
+        temperature = float(data.get('temperature', 0.7))
 
         with request_count_lock:
             request_count += 1
 
         t0 = time.time()
         try:
+            _apply_seed(data.get('seed', -1))
             with generation_lock:
                 result = model.generate_voice_design(
                     text=text,
@@ -663,6 +697,8 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                     instruct=instruct,
                     non_streaming_mode=True,
                     max_new_tokens=MAX_NEW_TOKENS,
+                    temperature=temperature,
+                    do_sample=temperature > 0,
                 )
                 model_last_used['voice_design'] = time.time()
 
@@ -754,6 +790,7 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
 
         language = data.get('language', 'Auto')
         prompt_path = data.get('prompt_path', '')
+        temperature = float(data.get('temperature', 0.7))
 
         with request_count_lock:
             request_count += 1
@@ -801,6 +838,7 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                         ref_text=d.get("ref_text", None),
                     ))
 
+                _apply_seed(data.get('seed', -1))
                 with generation_lock:
                     result = model.generate_voice_clone(
                         text=text,
@@ -808,6 +846,8 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                         voice_clone_prompt=items,
                         non_streaming_mode=True if not USE_FASTER else False,
                         max_new_tokens=MAX_NEW_TOKENS,
+                        temperature=temperature,
+                        do_sample=temperature > 0,
                     )
                     model_last_used['base'] = time.time()
 
@@ -828,6 +868,7 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                     _json_response(self, {'error': 'No reference audio or cached prompt provided'}, 400)
                     return
 
+                _apply_seed(data.get('seed', -1))
                 with generation_lock:
                     result = model.generate_voice_clone(
                         text=text,
@@ -837,6 +878,8 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                         xvec_only=x_vector_only,
                         non_streaming_mode=False,
                         max_new_tokens=MAX_NEW_TOKENS,
+                        temperature=temperature,
+                        do_sample=temperature > 0,
                     )
                     model_last_used['base'] = time.time()
                 wavs, sr = result
@@ -850,6 +893,7 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                     _json_response(self, {'error': 'No reference audio or cached prompt provided'}, 400)
                     return
 
+                _apply_seed(data.get('seed', -1))
                 with generation_lock:
                     wavs, sr = model.generate_voice_clone(
                         text=text,
@@ -859,6 +903,8 @@ class Qwen3TTSHandler(BaseHTTPRequestHandler):
                         x_vector_only_mode=x_vector_only,
                         non_streaming_mode=True,
                         max_new_tokens=MAX_NEW_TOKENS,
+                        temperature=temperature,
+                        do_sample=temperature > 0,
                     )
                     model_last_used['base'] = time.time()
 

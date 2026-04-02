@@ -1,6 +1,6 @@
 {
   "name": "qwen3-tts",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "description": "Qwen3-TTS \u2014 local AI text-to-speech with voice cloning, voice design, and preset voices",
   "author": "sapphire",
   "icon": "\ud83c\udfb5",
@@ -82,6 +82,27 @@
         "label": "Offload Timeout (seconds)",
         "default": "60",
         "help": "Seconds of inactivity before an idle model is moved from GPU to CPU. Set 0 to disable offloading."
+      },
+      {
+        "key": "temperature",
+        "type": "select",
+        "label": "Generation Temperature",
+        "default": "0.7",
+        "options": [
+          {"value": "0.0", "label": "0.0 — Greedy (perfectly consistent, may sound flat)"},
+          {"value": "0.3", "label": "0.3 — Very tight (minimal drift, natural)"},
+          {"value": "0.5", "label": "0.5 — Tight (recommended with seed lock)"},
+          {"value": "0.7", "label": "0.7 — Balanced (default)"},
+          {"value": "1.0", "label": "1.0 — Full randomness"}
+        ],
+        "help": "Lower values reduce voice drift between messages when using a locked seed. 0.5 is recommended for consistent persona voices."
+      },
+      {
+        "key": "seed",
+        "type": "string",
+        "label": "Generation Seed",
+        "default": "-1",
+        "help": "Random seed for voice generation. Use -1 for random each time, or any positive integer (e.g. 42) to lock voice consistency across messages. Different voices auto-derive unique seeds from this base value."
       },
       {
         "key": "max_new_tokens",

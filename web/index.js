@@ -72,6 +72,16 @@ registerPluginSettings({
                     <button class="qwen3-help-btn" id="qwen3-help-btn">? How to Use</button>
                 </div>
 
+                <div class="qwen3-seed-bar">
+                    <label class="qwen3-seed-label" for="qwen3-seed-input">\uD83C\uDFB2 Seed</label>
+                    <input type="number" id="qwen3-seed-input" class="qwen3-seed-input"
+                           min="-1" step="1" value="${settings?.seed ?? -1}"
+                           placeholder="-1 (random)" title="Set a fixed seed for consistent voice output. -1 = random each time." />
+                    <button class="qwen3-seed-lock" id="qwen3-seed-lock" title="Toggle seed lock">\uD83D\uDD13</button>
+                    <button class="qwen3-seed-roll" id="qwen3-seed-roll" title="Roll a new random seed">\uD83D\uDD00</button>
+                    <span class="qwen3-seed-hint" id="qwen3-seed-hint">Random each time</span>
+                </div>
+
                 <div class="qwen3-tabs">
                     <button class="qwen3-tab active" data-tab="design">\uD83C\uDFA8 Voice Design</button>
                     <button class="qwen3-tab" data-tab="clone">\uD83D\uDCCB Voice Clone</button>
@@ -562,6 +572,56 @@ async function _onModelSizeChange(container, newSize) {
 }
 
 
+// ── Seed Control ──
+
+function _setupSeedControl(container) {
+    const input = container.querySelector('#qwen3-seed-input');
+    const lockBtn = container.querySelector('#qwen3-seed-lock');
+    const rollBtn = container.querySelector('#qwen3-seed-roll');
+    const hint = container.querySelector('#qwen3-seed-hint');
+    if (!input || !lockBtn || !rollBtn) return;
+
+    function _updateHint() {
+        const v = parseInt(input.value, 10);
+        const locked = !isNaN(v) && v >= 0;
+        lockBtn.textContent = locked ? '\uD83D\uDD12' : '\uD83D\uDD13';
+        lockBtn.title = locked ? 'Seed locked \u2014 click to unlock (go random)' : 'Seed unlocked \u2014 click to lock with current value';
+        hint.textContent = locked ? `Locked to seed ${v}` : 'Random each time';
+        hint.style.color = locked ? 'var(--accent, #7c5cbf)' : '';
+        rollBtn.disabled = locked;
+    }
+
+    _updateHint();
+    input.addEventListener('input', _updateHint);
+    input.addEventListener('change', _updateHint);
+
+    // Lock/unlock toggle
+    lockBtn.addEventListener('click', () => {
+        const v = parseInt(input.value, 10);
+        if (!isNaN(v) && v >= 0) {
+            input.value = -1;
+        } else {
+            input.value = Math.floor(Math.random() * 2_000_000_000);
+        }
+        _updateHint();
+    });
+
+    // Roll a new random seed (only active when unlocked)
+    rollBtn.addEventListener('click', () => {
+        input.value = Math.floor(Math.random() * 2_000_000_000);
+        _updateHint();
+    });
+}
+
+/** Returns the current seed value to include in generate requests. */
+function _getSeed(container) {
+    const input = container.querySelector('#qwen3-seed-input');
+    if (!input) return -1;
+    const v = parseInt(input.value, 10);
+    return isNaN(v) ? -1 : v;
+}
+
+
 // ── Preset Dropdown Logic ──
 
 function _setupPresetDropdown(container, selectId, textareaId, opts = {}) {
@@ -640,7 +700,7 @@ function _attachListeners(container) {
         const text = container.querySelector('#qwen3-design-text')?.value;
         const instruct = _getPresetValue(container, 'qwen3-design-preset', 'qwen3-design-instruct');
         const language = container.querySelector('#qwen3-design-lang')?.value;
-        return await _apiPost('generate/design', { text, instruct, language });
+        return await _apiPost('generate/design', { text, instruct, language, seed: _getSeed(container) });
     });
     _attachSaveBtn(container, 'design', () => ({
         type: 'voice_design',
@@ -665,7 +725,7 @@ function _attachListeners(container) {
         container._cloneRefFilename = uploadRes.filename;
 
         return await _apiPost('generate/clone', {
-            text, ref_audio: refAudioB64, ref_text, x_vector_only, language
+            text, ref_audio: refAudioB64, ref_text, x_vector_only, language, seed: _getSeed(container)
         });
     });
     _attachSaveBtn(container, 'clone', () => ({
@@ -682,7 +742,7 @@ function _attachListeners(container) {
         const speaker = container.querySelector('#qwen3-custom-speaker')?.value;
         const instruct = _getPresetValue(container, 'qwen3-custom-style-preset', 'qwen3-custom-instruct');
         const language = container.querySelector('#qwen3-custom-lang')?.value;
-        return await _apiPost('generate/custom', { text, speaker, instruct, language });
+        return await _apiPost('generate/custom', { text, speaker, instruct, language, seed: _getSeed(container) });
     });
     _attachSaveBtn(container, 'custom', () => ({
         type: 'custom_voice',
@@ -698,6 +758,9 @@ function _attachListeners(container) {
     container.querySelector('#qwen3-custom-model-size')?.addEventListener('change', (e) => {
         _onModelSizeChange(container, e.target.value);
     });
+
+    // Seed control bar
+    _setupSeedControl(container);
 
     // Mic recording
     _setupRecordButton(container);

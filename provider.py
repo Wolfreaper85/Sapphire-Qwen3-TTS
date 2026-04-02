@@ -57,6 +57,48 @@ def _server_url():
     return f"http://localhost:{_get_port()}"
 
 
+def _get_temperature() -> float:
+    """Read configured generation temperature from plugin settings.
+
+    Lower values (0.3-0.5) tighten voice consistency across messages.
+    1.0 is the model default. 0.0 is fully greedy (deterministic but may sound flat).
+    """
+    settings = _get_settings()
+    try:
+        return float(settings.get('temperature', 0.7))
+    except (ValueError, TypeError):
+        return 0.7
+
+
+def _get_seed(voice_id: str = '') -> int:
+    """Derive a stable generation seed for a given voice.
+
+    When the user sets a base seed >= 0, we hash it together with the voice
+    identifier so that:
+      - Every message spoken by the *same* voice uses the same derived seed
+      - Different voices get different derived seeds (don't all sound alike)
+      - Changing the base seed shifts all voices together
+
+    Returns -1 when the base seed is -1, leaving generation fully random.
+    """
+    settings = _get_settings()
+    try:
+        base = int(settings.get('seed', -1))
+    except (ValueError, TypeError):
+        base = -1
+
+    if base < 0:
+        return -1
+
+    if not voice_id:
+        return base
+
+    # Hash base seed + voice_id into a stable 31-bit integer
+    import hashlib
+    digest = hashlib.md5(f"{base}:{voice_id}".encode()).digest()
+    return int.from_bytes(digest[:4], 'little') & 0x7FFFFFFF
+
+
 def _server_is_healthy():
     """Quick health check — is the server already responding?"""
     try:
@@ -303,6 +345,8 @@ class Qwen3TTSProvider(BaseTTSProvider):
             'text': text,
             'speaker': speaker,
             'language': 'Auto',
+            'seed': _get_seed(speaker),
+            'temperature': _get_temperature(),
         }
         if instruct:
             payload['instruct'] = instruct
@@ -353,17 +397,23 @@ class Qwen3TTSProvider(BaseTTSProvider):
                 'speaker': profile.speaker,
                 'instruct': profile.instruct or None,
                 'language': profile.language,
+                'seed': _get_seed(profile_id),
+                'temperature': _get_temperature(),
             })
         elif profile.type == 'voice_design':
             return self._post(server, '/generate/design', {
                 'text': text,
                 'instruct': profile.instruct,
                 'language': profile.language,
+                'seed': _get_seed(profile_id),
+                'temperature': _get_temperature(),
             })
         elif profile.type == 'voice_clone':
             payload = {
                 'text': text,
                 'language': profile.language,
+                'seed': _get_seed(profile_id),
+                'temperature': _get_temperature(),
             }
             # Use cached voice prompt if available (faster + more consistent)
             if profile.prompt_path:

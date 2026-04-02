@@ -32,6 +32,62 @@
     font-weight: 600;
 }
 
+/* ── Seed Control Bar ── */
+.qwen3-seed-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    border-radius: 6px;
+    background: var(--bg-secondary, #1a1a2e);
+    border: 1px solid var(--border, #2a2a40);
+}
+.qwen3-seed-label {
+    font-size: 0.82em;
+    font-weight: 600;
+    color: var(--text-muted, #888);
+    white-space: nowrap;
+    margin: 0;
+}
+.qwen3-seed-input {
+    width: 140px !important;
+    padding: 4px 8px !important;
+    font-size: 0.85em !important;
+    border-radius: 4px !important;
+    margin: 0 !important;
+    -moz-appearance: textfield;
+}
+.qwen3-seed-input::-webkit-outer-spin-button,
+.qwen3-seed-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+}
+.qwen3-seed-lock,
+.qwen3-seed-roll {
+    padding: 3px 8px;
+    border: 1px solid var(--border, #333);
+    border-radius: 4px;
+    background: var(--bg-tertiary, #252540);
+    cursor: pointer;
+    font-size: 0.85em;
+    line-height: 1.4;
+    transition: border-color 0.2s;
+}
+.qwen3-seed-lock:hover,
+.qwen3-seed-roll:hover {
+    border-color: var(--accent, #7c5cbf);
+}
+.qwen3-seed-roll:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+.qwen3-seed-hint {
+    font-size: 0.8em;
+    color: var(--text-muted, #888);
+    margin-left: 2px;
+    font-style: italic;
+}
+
 /* ── Top Bar (Help + Status) ── */
 .qwen3-top-bar {
     display: flex;
