@@ -8,6 +8,9 @@
   "default_enabled": false,
   "settingsUI": "plugin",
   "capabilities": {
+    "hooks": {
+      "pre_tts": "hooks/tts_guard.py"
+    },
     "providers": {
       "tts": {
         "key": "qwen3-tts",
