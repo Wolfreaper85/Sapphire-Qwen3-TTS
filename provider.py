@@ -338,6 +338,55 @@ class Qwen3TTSProvider(BaseTTSProvider):
                 time.sleep(min(poll_interval, remaining))
         return False
 
+    def _auto_switch_model_size(self, target_size: str) -> Optional[str]:
+        """Switch the server to a different model size and wait for it to be ready.
+
+        Saves the new model_size to plugin settings, kills the current server,
+        relaunches with the new size, and waits for it to become healthy.
+
+        Returns the new server URL on success, or None on failure.
+        """
+        import json as _json
+        try:
+            from core.plugin_loader import plugin_loader, PROJECT_ROOT
+            current = plugin_loader.get_plugin_settings('qwen3-tts') or {}
+            current['model_size'] = target_size
+
+            settings_dir = PROJECT_ROOT / "user" / "webui" / "plugins"
+            settings_dir.mkdir(parents=True, exist_ok=True)
+            settings_file = settings_dir / 'qwen3-tts.json'
+            with open(settings_file, 'w') as f:
+                _json.dump(current, f, indent=2)
+
+            logger.info(f"[Qwen3-TTS] Settings updated to model_size={target_size}")
+        except Exception as e:
+            logger.error(f"[Qwen3-TTS] Failed to save model_size setting: {e}")
+            return None
+
+        # Kill current server and relaunch
+        port = _get_port()
+        kill_process_on_port(port)
+        global _server_manager
+        if _server_manager:
+            try:
+                _server_manager.stop()
+            except Exception:
+                pass
+            _server_manager = None
+        time.sleep(1)
+
+        _start_server()
+
+        # Wait for the new server — model load can take 30-60s for 1.7B
+        logger.info(f"[Qwen3-TTS] Waiting for {target_size} server to become ready...")
+        if self._wait_for_server(timeout=90, poll_interval=2.0):
+            new_url = _server_url()
+            logger.info(f"[Qwen3-TTS] Server switched to {target_size} successfully")
+            return new_url
+        else:
+            logger.error(f"[Qwen3-TTS] Server failed to start with {target_size} within timeout")
+            return None
+
     def _generate_custom(self, server: str, text: str, speaker: str,
                          instruct: Optional[str], speed: float) -> Optional[bytes]:
         """Generate using CustomVoice model (preset speaker + instruction)."""
@@ -369,23 +418,30 @@ class Qwen3TTSProvider(BaseTTSProvider):
             logger.warning(f"Qwen3-TTS: voice profile '{profile_id}' not found, using default")
             return self._generate_custom(server, text, DEFAULT_SPEAKER, None, speed)
 
-        # Check model size compatibility
+        # Check model size compatibility — auto-switch if needed
         profile_size = getattr(profile, 'model_size', '') or ''
         current_settings = _get_settings()
         current_size = current_settings.get('model_size', '0.6B')
         model_size_mismatch = bool(profile_size and profile_size != current_size)
 
-        if model_size_mismatch and profile.type == 'voice_clone':
-            # Hard block: clone voices have incompatible tensor dimensions across model sizes.
-            # Generating produces hallucinated/garbled audio instead of failing cleanly.
-            logger.error(
-                f"[Qwen3-TTS] BLOCKED: Voice '{profile.name}' is a {profile_size} clone "
-                f"but server runs {current_size}. Clone voices are incompatible across "
-                f"model sizes. Create a new clone on {current_size} or switch server to {profile_size}."
+        if model_size_mismatch and profile.type in ('voice_clone', 'voice_design'):
+            # Clone/design voices are incompatible across model sizes (different tensor
+            # dimensions). Auto-switch the server to the voice's model size.
+            logger.info(
+                f"[Qwen3-TTS] Auto-switching server from {current_size} to {profile_size} "
+                f"for voice '{profile.name}' ({profile.type})"
             )
-            return None
+            new_server = self._auto_switch_model_size(profile_size)
+            if new_server:
+                server = new_server
+            else:
+                logger.error(
+                    f"[Qwen3-TTS] Failed to auto-switch to {profile_size} for voice "
+                    f"'{profile.name}'. Server may still be loading — try again in a moment."
+                )
+                return None
 
-        if model_size_mismatch:
+        elif model_size_mismatch:
             logger.warning(
                 f"[Qwen3-TTS] Voice '{profile.name}' was created with {profile_size} "
                 f"but server is running {current_size} — results may differ."
