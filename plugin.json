@@ -34,7 +34,10 @@
       {"method": "POST", "path": "upload-ref",            "handler": "routes/api.py:upload_reference_audio"},
       {"method": "POST", "path": "open-folder",           "handler": "routes/api.py:open_folder"},
       {"method": "POST", "path": "create-prompt",         "handler": "routes/api.py:create_prompt"},
-      {"method": "POST", "path": "change-model-size",    "handler": "routes/api.py:change_model_size"}
+      {"method": "POST", "path": "change-model-size",    "handler": "routes/api.py:change_model_size"},
+      {"method": "POST", "path": "silent-mode/on",       "handler": "routes/api.py:enable_silent_mode"},
+      {"method": "POST", "path": "silent-mode/off",      "handler": "routes/api.py:disable_silent_mode"},
+      {"method": "GET",  "path": "silent-mode",          "handler": "routes/api.py:get_silent_mode_status"}
     ],
     "settings": [
       {

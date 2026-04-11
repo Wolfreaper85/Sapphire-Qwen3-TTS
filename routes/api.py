@@ -408,3 +408,139 @@ async def upload_reference_audio(**kwargs):
     model_size = body.get("model_size", "0.6B")
     filename = voice_manager.save_audio_file(audio_bytes, voice_type=voice_type, model_size=model_size, prefix="ref", ext=ext)
     return {"status": "uploaded", "filename": filename}
+
+
+# =============================================================================
+# Silent Mode — full TTS unload to free VRAM
+# =============================================================================
+
+# Stash for restoring voice after silent mode
+_silent_mode_state = {
+    'active': False,
+    'previous_provider': None,
+}
+
+
+async def enable_silent_mode(**kwargs):
+    """POST /api/plugin/qwen3-tts/silent-mode/on — kill all TTS servers and free VRAM.
+
+    Switches TTS to 'none', kills Qwen3-TTS and F5-TTS subprocess servers,
+    and frees all GPU memory used by voice models.
+    """
+    from core.process_manager import kill_process_on_port
+    from core.settings_manager import settings as _settings
+    import time as _time
+
+    if _silent_mode_state['active']:
+        return {"status": "already_silent", "message": "Silent mode is already active"}
+
+    # Remember current provider so we can restore it
+    try:
+        import config as _config
+        current_provider = getattr(_config, 'TTS_PROVIDER', 'none')
+    except Exception:
+        current_provider = 'none'
+
+    _silent_mode_state['previous_provider'] = current_provider
+    _silent_mode_state['active'] = True
+
+    killed = []
+
+    # 1. Switch TTS to none via the system object (monkey-patch safe)
+    try:
+        from core.api_fastapi import get_system
+        system = get_system()
+        system.switch_tts_provider('none')
+        _settings.set('TTS_PROVIDER', 'none', persist=True)
+        logger.info("[Silent Mode] TTS provider switched to 'none'")
+    except Exception as e:
+        logger.error(f"[Silent Mode] Failed to switch provider: {e}")
+
+    # 2. Kill Qwen3-TTS server subprocess
+    try:
+        from provider import _stop_server as _stop_qwen3, _server_manager as _qwen3_mgr
+        _stop_qwen3()
+        logger.info("[Silent Mode] Qwen3-TTS server stopped")
+        killed.append('qwen3-tts')
+    except Exception:
+        pass
+    # Belt-and-suspenders: kill by port
+    try:
+        from core.plugin_loader import plugin_loader
+        _settings = plugin_loader.get_plugin_settings('qwen3-tts') or {}
+        port = int(_settings.get('server_port', 5013))
+        if kill_process_on_port(port):
+            logger.info(f"[Silent Mode] Killed process on port {port}")
+            if 'qwen3-tts' not in killed:
+                killed.append('qwen3-tts')
+    except Exception:
+        pass
+
+    # 3. Kill F5-TTS server subprocess
+    try:
+        f5_port = 5014
+        if kill_process_on_port(f5_port):
+            logger.info(f"[Silent Mode] Killed F5-TTS on port {f5_port}")
+            killed.append('f5-tts')
+    except Exception:
+        pass
+
+    # 4. Kill Kokoro server
+    try:
+        kokoro_port = 5012
+        if kill_process_on_port(kokoro_port):
+            logger.info(f"[Silent Mode] Killed Kokoro on port {kokoro_port}")
+            killed.append('kokoro')
+    except Exception:
+        pass
+
+    logger.info(f"[Silent Mode] ACTIVE — killed: {killed}, previous provider: {current_provider}")
+    return {
+        "status": "silent",
+        "killed": killed,
+        "previous_provider": current_provider,
+        "message": f"Silent mode active. Killed {', '.join(killed) or 'no servers'}. VRAM freed."
+    }
+
+
+async def disable_silent_mode(**kwargs):
+    """POST /api/plugin/qwen3-tts/silent-mode/off — restore TTS and relaunch servers.
+
+    Restores the previous TTS provider and relaunches the appropriate server.
+    """
+    from core.settings_manager import settings as _settings
+
+    if not _silent_mode_state['active']:
+        return {"status": "not_silent", "message": "Silent mode is not active"}
+
+    previous = _silent_mode_state.get('previous_provider') or 'qwen3-tts'
+    _silent_mode_state['active'] = False
+    _silent_mode_state['previous_provider'] = None
+
+    # Restore the TTS provider — this will auto-launch the server
+    try:
+        from core.api_fastapi import get_system
+        system = get_system()
+        success = system.switch_tts_provider(previous)
+        if success:
+            _settings.set('TTS_PROVIDER', previous, persist=True)
+            logger.info(f"[Silent Mode] OFF — restored provider: {previous}")
+            return {
+                "status": "voice_restored",
+                "provider": previous,
+                "message": f"Voice restored to {previous}. Server launching..."
+            }
+        else:
+            logger.error(f"[Silent Mode] Failed to restore provider: {previous}")
+            return {"status": "error", "message": f"Failed to restore {previous}"}
+    except Exception as e:
+        logger.error(f"[Silent Mode] Restore error: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+async def get_silent_mode_status(**kwargs):
+    """GET /api/plugin/qwen3-tts/silent-mode — check if silent mode is active."""
+    return {
+        "active": _silent_mode_state['active'],
+        "previous_provider": _silent_mode_state.get('previous_provider'),
+    }
