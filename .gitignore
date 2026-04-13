@@ -48,3 +48,6 @@ voices/**/*.pt
 
 # Logs
 *.log
+
+# Runtime state
+.silent_mode_state.json

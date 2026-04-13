@@ -414,11 +414,32 @@ async def upload_reference_audio(**kwargs):
 # Silent Mode — full TTS unload to free VRAM
 # =============================================================================
 
-# Stash for restoring voice after silent mode
-_silent_mode_state = {
-    'active': False,
-    'previous_provider': None,
-}
+# Persist state to disk so restarts can restore properly
+_SILENT_STATE_FILE = os.path.join(_plugin_dir, '.silent_mode_state.json')
+
+
+def _load_silent_state():
+    """Load silent mode state from disk. Returns dict with 'active' and 'previous_provider'."""
+    try:
+        if os.path.exists(_SILENT_STATE_FILE):
+            with open(_SILENT_STATE_FILE, 'r') as f:
+                data = json.load(f)
+            return {
+                'active': bool(data.get('active', False)),
+                'previous_provider': data.get('previous_provider'),
+            }
+    except Exception as e:
+        logger.warning(f"[Silent Mode] Failed to load state file: {e}")
+    return {'active': False, 'previous_provider': None}
+
+
+def _save_silent_state(active, previous_provider=None):
+    """Persist silent mode state to disk."""
+    try:
+        with open(_SILENT_STATE_FILE, 'w') as f:
+            json.dump({'active': active, 'previous_provider': previous_provider}, f)
+    except Exception as e:
+        logger.warning(f"[Silent Mode] Failed to save state file: {e}")
 
 
 async def enable_silent_mode(**kwargs):
@@ -431,7 +452,8 @@ async def enable_silent_mode(**kwargs):
     from core.settings_manager import settings as _settings
     import time as _time
 
-    if _silent_mode_state['active']:
+    state = _load_silent_state()
+    if state['active']:
         return {"status": "already_silent", "message": "Silent mode is already active"}
 
     # Remember current provider so we can restore it
@@ -441,8 +463,8 @@ async def enable_silent_mode(**kwargs):
     except Exception:
         current_provider = 'none'
 
-    _silent_mode_state['previous_provider'] = current_provider
-    _silent_mode_state['active'] = True
+    # Persist state to disk BEFORE switching — survives restarts
+    _save_silent_state(active=True, previous_provider=current_provider)
 
     killed = []
 
@@ -467,8 +489,8 @@ async def enable_silent_mode(**kwargs):
     # Belt-and-suspenders: kill by port
     try:
         from core.plugin_loader import plugin_loader
-        _settings = plugin_loader.get_plugin_settings('qwen3-tts') or {}
-        port = int(_settings.get('server_port', 5013))
+        _psettings = plugin_loader.get_plugin_settings('qwen3-tts') or {}
+        port = int(_psettings.get('server_port', 5013))
         if kill_process_on_port(port):
             logger.info(f"[Silent Mode] Killed process on port {port}")
             if 'qwen3-tts' not in killed:
@@ -507,15 +529,42 @@ async def disable_silent_mode(**kwargs):
     """POST /api/plugin/qwen3-tts/silent-mode/off — restore TTS and relaunch servers.
 
     Restores the previous TTS provider and relaunches the appropriate server.
+    Also handles the 'zombie' case where Sapphire restarted during silent mode —
+    TTS_PROVIDER is 'none' but in-memory state was lost. The disk state file
+    preserves the previous provider across restarts.
     """
     from core.settings_manager import settings as _settings
 
-    if not _silent_mode_state['active']:
+    state = _load_silent_state()
+    if not state['active']:
+        # Check for zombie state: TTS_PROVIDER is 'none' but disk state says inactive
+        # This happens if someone manually cleared the state or there's a mismatch
+        try:
+            import config as _config
+            if getattr(_config, 'TTS_PROVIDER', 'none') == 'none':
+                # Zombie detected — force restore to qwen3-tts
+                logger.warning("[Silent Mode] Zombie state detected — TTS is 'none' but silent mode not active. Force-restoring.")
+                previous = 'qwen3-tts'
+                from core.api_fastapi import get_system
+                system = get_system()
+                success = system.switch_tts_provider(previous)
+                if success:
+                    _settings.set('TTS_PROVIDER', previous, persist=True)
+                    _save_silent_state(active=False, previous_provider=None)
+                    logger.info(f"[Silent Mode] Zombie fixed — restored provider: {previous}")
+                    return {
+                        "status": "voice_restored",
+                        "provider": previous,
+                        "message": f"Voice restored to {previous}. Server launching..."
+                    }
+        except Exception:
+            pass
         return {"status": "not_silent", "message": "Silent mode is not active"}
 
-    previous = _silent_mode_state.get('previous_provider') or 'qwen3-tts'
-    _silent_mode_state['active'] = False
-    _silent_mode_state['previous_provider'] = None
+    previous = state.get('previous_provider') or 'qwen3-tts'
+
+    # Clear state file BEFORE restoring — even if restore fails, we don't stay stuck
+    _save_silent_state(active=False, previous_provider=None)
 
     # Restore the TTS provider — this will auto-launch the server
     try:
@@ -540,7 +589,20 @@ async def disable_silent_mode(**kwargs):
 
 async def get_silent_mode_status(**kwargs):
     """GET /api/plugin/qwen3-tts/silent-mode — check if silent mode is active."""
+    state = _load_silent_state()
+
+    # Also detect zombie state for the UI
+    is_zombie = False
+    if not state['active']:
+        try:
+            import config as _config
+            if getattr(_config, 'TTS_PROVIDER', 'none') == 'none':
+                is_zombie = True
+        except Exception:
+            pass
+
     return {
-        "active": _silent_mode_state['active'],
-        "previous_provider": _silent_mode_state.get('previous_provider'),
+        "active": state['active'] or is_zombie,
+        "previous_provider": state.get('previous_provider') or ('qwen3-tts' if is_zombie else None),
+        "zombie": is_zombie,
     }

@@ -278,6 +278,24 @@ class Qwen3TTSProvider(BaseTTSProvider):
     def generate(self, text: str, voice: str, speed: float, **kwargs) -> Optional[bytes]:
         """Generate audio. Dispatches to the right model based on voice ID format."""
         logger.info(f"[Qwen3-TTS] generate() called with voice='{voice}', speed={speed}")
+
+        # ── Safety net: if we got a non-qwen3 voice (af_heart, etc.), the
+        # TTSClient's voice_name is stale. Look up the active persona's REAL
+        # voice and use that instead of falling back to ryan.
+        if not voice or not voice.startswith('qwen3:'):
+            resolved = self._resolve_persona_voice()
+            if resolved:
+                logger.info(f"[Qwen3-TTS] generate() resolved stale voice '{voice}' -> '{resolved}' from active persona")
+                voice = resolved
+                # Also fix the TTSClient so subsequent calls don't need resolving
+                try:
+                    from core.api_fastapi import get_system
+                    system = get_system()
+                    if system and hasattr(system, 'tts'):
+                        system.tts.voice_name = voice
+                except Exception:
+                    pass
+
         clamped_speed = max(self.SPEED_MIN, min(self.SPEED_MAX, speed))
         if clamped_speed != speed:
             logger.warning(f"Qwen3-TTS: clamped speed {speed} -> {clamped_speed}")
@@ -314,11 +332,41 @@ class Qwen3TTSProvider(BaseTTSProvider):
             return self._generate_from_profile(server, text, profile_id, clamped_speed)
 
         else:
-            # Non-qwen3 voice ID — always fall back to DEFAULT_SPEAKER.
-            # Unknown voices (af_heart, f5:xxx, empty string, etc.) should
-            # never be sent as a CustomVoice speaker name.
+            # Non-qwen3 voice ID AND persona lookup didn't resolve — last resort
             logger.warning(f"[Qwen3-TTS] -> non-qwen3 voice '{voice}', falling back to default speaker: {DEFAULT_SPEAKER}")
             return self._generate_custom(server, text, DEFAULT_SPEAKER, kwargs.get('instruct'), clamped_speed)
+
+    @staticmethod
+    def _resolve_persona_voice() -> Optional[str]:
+        """Look up the active persona's configured voice.
+
+        Returns the qwen3 voice ID if the persona has one, else None.
+        This is the last-resort safety net — if the pre_tts hook failed to
+        fix the voice, we catch it here before generating with 'ryan'.
+        """
+        try:
+            from core.api_fastapi import get_system
+            system = get_system()
+            if not system or not hasattr(system, 'llm_chat'):
+                return None
+
+            from core.personas.persona_manager import persona_manager
+            chat_settings = system.llm_chat.session_manager.get_chat_settings()
+            active_persona = chat_settings.get("persona") or ''
+            if not active_persona:
+                return None
+
+            pdata = persona_manager.get(active_persona)
+            if not pdata or not isinstance(pdata, dict):
+                return None
+
+            voice = pdata.get("settings", {}).get("voice", "")
+            if voice and voice.startswith("qwen3:"):
+                return voice
+            return None
+        except Exception as e:
+            logger.debug(f"[Qwen3-TTS] _resolve_persona_voice error: {e}")
+            return None
 
     def _wait_for_server(self, timeout: int = 60, poll_interval: float = 2.0) -> bool:
         """Wait for the server to become healthy, polling periodically.

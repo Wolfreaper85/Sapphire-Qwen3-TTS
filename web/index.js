@@ -69,6 +69,8 @@ registerPluginSettings({
             <div class="qwen3-voice-lab">
                 <div class="qwen3-top-bar">
                     <div class="qwen3-status" id="qwen3-status" style="flex:1;margin:0 12px 0 0"></div>
+                    <button class="qwen3-silent-btn" id="qwen3-silent-btn" title="Kill all TTS servers and free VRAM">\uD83D\uDD07 Go Silent</button>
+                    <span class="qwen3-silent-status" id="qwen3-silent-status"></span>
                     <button class="qwen3-help-btn" id="qwen3-help-btn">? How to Use</button>
                 </div>
 
@@ -502,6 +504,79 @@ async function _checkStatus(container) {
 }
 
 
+// ── Silent Mode Toggle ──
+
+async function _setupSilentMode(container) {
+    const btn = container.querySelector('#qwen3-silent-btn');
+    const status = container.querySelector('#qwen3-silent-status');
+    if (!btn) return;
+
+    const updateUI = (active) => {
+        if (active) {
+            btn.textContent = '\uD83D\uDD0A Restore Voice';
+            btn.style.background = 'var(--color-success, #4caf50)';
+            btn.style.color = '#fff';
+            status.textContent = 'Silent mode active \u2014 TTS servers stopped, VRAM freed.';
+            status.style.color = 'var(--color-warning, #ff9800)';
+        } else {
+            btn.textContent = '\uD83D\uDD07 Go Silent';
+            btn.style.background = 'var(--color-error, #f44336)';
+            btn.style.color = '#fff';
+            status.textContent = '';
+        }
+    };
+
+    // Check initial state
+    try {
+        const res = await fetch(`${API}/silent-mode`);
+        if (res.ok) {
+            const data = await res.json();
+            updateUI(data.active);
+        } else {
+            updateUI(false);
+        }
+    } catch {
+        btn.textContent = 'Unavailable';
+        btn.disabled = true;
+        return;
+    }
+
+    btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        const isSilent = btn.textContent.includes('Restore');
+
+        btn.textContent = isSilent ? 'Restoring...' : 'Shutting down...';
+        status.textContent = isSilent ? 'Relaunching TTS servers...' : 'Killing TTS servers...';
+        status.style.color = 'var(--color-text-muted, #888)';
+
+        try {
+            const endpoint = isSilent ? 'off' : 'on';
+            const res = await fetch(`${API}/silent-mode/${endpoint}`, {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': CSRF(), 'Content-Type': 'application/json' },
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+
+            if (data.status === 'silent' || data.status === 'already_silent') {
+                updateUI(true);
+            } else if (data.status === 'voice_restored' || data.status === 'not_silent') {
+                updateUI(false);
+                // Refresh status bar since server is relaunching
+                setTimeout(() => _checkStatus(container), 3000);
+            } else if (data.status === 'error') {
+                status.textContent = data.message || 'Error';
+                status.style.color = 'var(--color-error, #f44336)';
+            }
+        } catch (e) {
+            status.textContent = `Error: ${e.message}`;
+            status.style.color = 'var(--color-error, #f44336)';
+        }
+        btn.disabled = false;
+    });
+}
+
+
 // ── Model Size Dropdown Logic ──
 
 function _syncModelSizeDropdowns(container, size) {
@@ -670,6 +745,9 @@ function _getPresetValue(container, selectId, textareaId) {
 function _attachListeners(container) {
     // Help button
     container.querySelector('#qwen3-help-btn')?.addEventListener('click', _showHelpModal);
+
+    // Silent Mode toggle
+    _setupSilentMode(container);
 
     // Tabs
     container.querySelectorAll('.qwen3-tab').forEach(tab => {

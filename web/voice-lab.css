@@ -91,9 +91,34 @@
 /* ── Top Bar (Help + Status) ── */
 .qwen3-top-bar {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 8px;
     margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+.qwen3-silent-btn {
+    padding: 5px 14px;
+    border: none;
+    border-radius: 6px;
+    background: var(--color-error, #f44336);
+    color: #fff;
+    cursor: pointer;
+    font-size: 0.82em;
+    font-weight: 600;
+    transition: opacity 0.2s, filter 0.2s;
+    white-space: nowrap;
+}
+.qwen3-silent-btn:hover {
+    filter: brightness(1.15);
+}
+.qwen3-silent-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.qwen3-silent-status {
+    font-size: 0.8em;
+    margin: 0 6px;
+    white-space: nowrap;
 }
 .qwen3-help-btn {
     padding: 5px 12px;
