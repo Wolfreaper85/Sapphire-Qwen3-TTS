@@ -156,7 +156,7 @@ def load_models():
     # fails with "Offset increment outside graph capture encountered unexpectedly".
     # Force SDPA when using the faster backend.
     if USE_FASTER and attn_impl == "flash_attention_2":
-        logger.info("Overriding flash_attention_2 → sdpa (required for CUDA graph capture)")
+        logger.info("Overriding flash_attention_2 -> sdpa (required for CUDA graph capture)")
         attn_impl = "sdpa"
 
     logger.info(f"Model loading config: LOAD_MODELS={LOAD_MODELS}")
