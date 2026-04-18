@@ -105,7 +105,13 @@ def _auto_switch_provider_for_voice(voice: str) -> None:
 
         from core.settings_manager import settings as _settings
         system.switch_tts_provider(target)
-        _settings.set('TTS_PROVIDER', target, persist=True)
+        # persist=False: auto-switches are ephemeral (per-call). They route audio
+        # correctly at runtime but DO NOT overwrite the user's chosen default in
+        # settings.json. Prevents Discord-daemon or other transient voice
+        # resolutions from poisoning the persisted TTS_PROVIDER across restarts.
+        # Manual provider changes from the settings UI still persist via
+        # toggle_tts() / the settings route.
+        _settings.set('TTS_PROVIDER', target, persist=False)
 
     except Exception as e:
         logger.warning(f"[qwen3-tts] auto-switch error: {e}")
@@ -441,7 +447,10 @@ def pre_tts(event):
 
             from core.settings_manager import settings as _settings
             system.switch_tts_provider(target_provider)
-            _settings.set('TTS_PROVIDER', target_provider, persist=True)
+            # persist=False: see note in _auto_switch_provider_for_voice above.
+            # Per-call switches route correctly without overwriting the user's
+            # manually-chosen default TTS_PROVIDER across restarts.
+            _settings.set('TTS_PROVIDER', target_provider, persist=False)
             needs_fix = True
 
         # ── Voice mismatch — fix it ──────────────────────────────────────
