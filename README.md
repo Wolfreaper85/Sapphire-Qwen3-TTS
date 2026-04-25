@@ -2,6 +2,25 @@
 
 Local AI text-to-speech plugin for [Sapphire](https://github.com/SapphireAI) with voice cloning, voice design, and preset speakers. Uses [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) models from Alibaba/Qwen.
 
+## ⚠️ Compatibility Warning — Conflicts with Cohere Transcribe
+
+This plugin pins **transformers == 4.57.3** (forced by the `qwen-tts` upstream dependency's exact pin).
+
+If you also use the [Sapphire-cohere-transcribe plugin](https://github.com/Wolfreaper85/Sapphire-cohere-transcribe) (or its GitLab mirror at https://gitlab.com/Wolfreaper85/Sapphire-cohere-transcribe), be aware: Cohere Transcribe needs **transformers >= 5.4.0** for the `CohereAsrForConditionalGeneration` class.
+
+**You cannot run both plugins at the same time** until the upstream dependency conflict is resolved. Whichever transformers version is installed determines which plugin works:
+
+| transformers version | Qwen3-TTS | Cohere Transcribe |
+|---|---|---|
+| `4.57.3` (this plugin needs) | works | won't load |
+| `>= 5.4.0` (Cohere needs) | crashes on startup | works |
+
+Symptoms if you upgrade transformers to 5.x: this plugin crashes on startup with `check_model_inputs()` or similar errors, all saved voice clones become unplayable, system falls back to Kokoro voices.
+
+If you need STT alongside Qwen3-TTS, alternatives include:
+- **[Sapphire-Parakeet-STT](https://github.com/Wolfreaper85/Sapphire-Parakeet-STT)** — NeMo-based, 4.85% WER on LibriSpeech, no transformers conflict
+- **Faster-Whisper** — Sapphire's bundled fallback STT, no extra install required
+
 ## Features
 
 - **Voice Design** - Create voices from natural language descriptions (e.g. "a warm, gravelly male voice with a slow pace")
