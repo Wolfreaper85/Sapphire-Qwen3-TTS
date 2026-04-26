@@ -9,7 +9,7 @@
   "settingsUI": "plugin",
   "capabilities": {
     "hooks": {
-      "pre_tts": "hooks/tts_guard.py"
+      "_pre_tts_DISABLED_v2.6.0_voice_registry": "hooks/tts_guard.py"
     },
     "providers": {
       "tts": {

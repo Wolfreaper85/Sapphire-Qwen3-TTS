@@ -29,6 +29,31 @@ logger = logging.getLogger(__name__)
 DEFAULT_PORT = 5013
 DEFAULT_SPEAKER = 'ryan'
 
+
+# ─── v2.6.0 voice_registry registration ────────────────────────────────────
+# Replaces the older tts_guard.py monkey-patch approach.
+# Core's voice_registry routes voices to this provider when the matcher fires.
+# Plugin authors register at module-import time so the mapping is live before
+# any TTS request hits the system.
+try:
+    from core.tts.utils import voice_registry
+
+    def _matches_qwen3(voice):
+        """Match qwen3:* voice IDs (qwen3:preset:ryan, qwen3:persona-v2-xyz, etc.)"""
+        return bool(voice) and ':' in voice and voice.split(':', 1)[0] == 'qwen3'
+
+    voice_registry.register(
+        'qwen3-tts',
+        _matches_qwen3,
+        f'qwen3:preset:{DEFAULT_SPEAKER}',  # 'qwen3:preset:ryan' — default if a switch picks one
+    )
+    logger.info("[qwen3-tts] Registered with core voice_registry (matcher: qwen3:* voices)")
+except ImportError:
+    # Older Sapphire (<v2.6.0) doesn't have voice_registry — fall back to
+    # tts_guard.py's monkey-patch approach (still loaded via plugin.json's
+    # pre_tts hook entry, so behavior is unchanged on older versions).
+    logger.debug("[qwen3-tts] voice_registry not available (Sapphire < v2.6.0) — relying on tts_guard hook")
+
 # Module-level server manager — persists across provider re-creation
 _server_manager: Optional[ProcessManager] = None
 _last_relaunch_attempt: float = 0.0  # Cooldown to prevent restart loops
