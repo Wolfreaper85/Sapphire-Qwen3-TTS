@@ -130,10 +130,31 @@ def _install_validate_voice_patch() -> None:
 
     Without patching all three, consumers that already imported the original
     reference at their module load time would keep calling the old version.
+
+    NOTE (2026-04-27): Skipped on Sapphire v2.6.0+ where `voice_registry` does
+    this job cleanly via core's own dispatch. Running both side-by-side caused
+    an auto-switch loop (each system kept seeing the other's intermediate state
+    as "wrong" and re-firing). On older Sapphire installs without
+    `voice_registry`, the legacy patch still installs as before.
     """
     global _patch_installed
     if _patch_installed:
         return
+
+    # v2.6.0+ voice_registry detection — provider.py registers there at import,
+    # so by the time this function runs, the registry is already wired up if
+    # available. Skip the legacy patch in that case to avoid a switch loop.
+    try:
+        from core.tts.utils import voice_registry  # noqa: F401
+        logger.info(
+            "[qwen3-tts] voice_registry detected (v2.6.0+) — skipping legacy "
+            "validate_voice monkey-patch (clean API handles auto-switch)"
+        )
+        _patch_installed = True  # Mark done so we don't re-evaluate on every call
+        return
+    except ImportError:
+        # Pre-v2.6.0 Sapphire: voice_registry doesn't exist, install the patch
+        pass
 
     try:
         from core.tts import utils as _tts_utils
