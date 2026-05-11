@@ -6,7 +6,7 @@ Local AI text-to-speech plugin for [Sapphire](https://github.com/SapphireAI) wit
 
 This plugin pins **transformers == 4.57.3** (forced by the `qwen-tts` upstream dependency's exact pin).
 
-If you also use the [Sapphire-cohere-transcribe plugin](https://github.com/Wolfreaper85/Sapphire-cohere-transcribe) (or its GitLab mirror at https://gitlab.com/Wolfreaper85/Sapphire-cohere-transcribe), be aware: Cohere Transcribe needs **transformers >= 5.4.0** for the `CohereAsrForConditionalGeneration` class.
+If you also use the [Sapphire-cohere-transcribe plugin](https://gitlab.com/Wolfreaper85/Sapphire-cohere-transcribe), be aware: Cohere Transcribe needs **transformers >= 5.4.0** for the `CohereAsrForConditionalGeneration` class.
 
 **You cannot run both plugins at the same time** until the upstream dependency conflict is resolved. Whichever transformers version is installed determines which plugin works:
 
@@ -18,7 +18,7 @@ If you also use the [Sapphire-cohere-transcribe plugin](https://github.com/Wolfr
 Symptoms if you upgrade transformers to 5.x: this plugin crashes on startup with `check_model_inputs()` or similar errors, all saved voice clones become unplayable, system falls back to Kokoro voices.
 
 If you need STT alongside Qwen3-TTS, alternatives include:
-- **[Sapphire-Parakeet-STT](https://github.com/Wolfreaper85/Sapphire-Parakeet-STT)** — NeMo-based, 4.85% WER on LibriSpeech, no transformers conflict
+- **[Sapphire-Parakeet-STT](https://gitlab.com/Wolfreaper85/Sapphire-Parakeet-STT)** — NeMo-based, 4.85% WER on LibriSpeech, no transformers conflict
 - **Faster-Whisper** — Sapphire's bundled fallback STT, no extra install required
 
 ## Features
